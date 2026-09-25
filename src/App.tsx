@@ -29,6 +29,8 @@ export function App() {
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(!auth);
   const [trackingNotice, setTrackingNotice] = useState(false);
+  const [registrationCompletedSerial, setRegistrationCompletedSerial] = useState<string | null>(null);
+  const [registrationTrackedBillsAvailable, setRegistrationTrackedBillsAvailable] = useState(false);
   const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
   const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
   const [routeRevision, setRouteRevision] = useState(0);
@@ -97,6 +99,10 @@ export function App() {
 
       // #/bill/XXXX または /bill/XXXX に対応
       const billMatch = hash.match(/#\/bill\/([A-Za-z0-9]+)/) || pathname.match(/\/bill\/([A-Za-z0-9]+)/);
+      if (!billMatch) {
+        setRegistrationCompletedSerial(null);
+        setRegistrationTrackedBillsAvailable(false);
+      }
       if (billMatch && billMatch[1]) {
         setSelectedSerial(normalizeSerialNumber(billMatch[1]));
         setCurrentView('bill');
@@ -121,8 +127,12 @@ export function App() {
     };
   }, []);
 
-  const navigateTo = (view: ViewMode, serial?: string) => {
+  const navigateTo = (view: ViewMode, serial?: string, keepRegistrationNotice = false) => {
     setRouteRevision((revision) => revision + 1);
+    if (!keepRegistrationNotice) {
+      setRegistrationCompletedSerial(null);
+      setRegistrationTrackedBillsAvailable(false);
+    }
     if (view === 'bill' && serial) {
       const norm = normalizeSerialNumber(serial);
       setSelectedSerial(norm);
@@ -153,11 +163,14 @@ export function App() {
   const handleRegisterSuccess = (result: RegisterResult, trackingFailed = false) => {
     setTrackingNotice(trackingFailed);
     if (result.isRediscovery) {
+      setRegistrationCompletedSerial(null);
       // 再発見時の祝祭モーダルを表示
       setCelebrationResult(result);
     } else {
+      setRegistrationCompletedSerial(result.bill.serialNumber);
+      setRegistrationTrackedBillsAvailable(Boolean(authUid && !trackingFailed));
       // 初回登録の場合も紙幣詳細ページへ
-      navigateTo('bill', result.bill.serialNumber);
+      navigateTo('bill', result.bill.serialNumber, true);
     }
   };
 
@@ -177,6 +190,10 @@ export function App() {
             setCelebrationResult(null);
             navigateTo('bill', serial);
           }}
+          onViewTrackedBills={authUid ? () => {
+            setCelebrationResult(null);
+            navigateTo('tracked');
+          } : undefined}
         />
       )}
 
@@ -245,6 +262,9 @@ export function App() {
           <BillDetailView
             serialNumber={selectedSerial}
             userUid={authUid}
+            registrationCompleted={registrationCompletedSerial === selectedSerial}
+            showTrackedBillsLink={registrationTrackedBillsAvailable}
+            onNavigateTrackedBills={() => navigateTo('tracked')}
             onBack={() => navigateTo('home')}
             onRegisterAgain={(serial) => navigateTo('register', serial)}
           />

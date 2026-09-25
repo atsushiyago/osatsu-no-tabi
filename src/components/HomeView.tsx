@@ -138,6 +138,11 @@ export const HomeView = ({
         </div>
       </section>
 
+      <aside className="home-return-note" aria-label="また旅の続きを見る楽しみ">
+        <p>今日登録したお札が、数週間後には遠くの街で見つかっているかもしれません。</p>
+        <p className="home-return-note-followup">また旅の続きを見にきてください。</p>
+      </aside>
+
       {/* 全体統計 */}
       <section className="stats-container">
         <div className="stats-title">

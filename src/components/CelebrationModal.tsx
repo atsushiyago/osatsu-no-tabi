@@ -7,12 +7,14 @@ interface CelebrationModalProps {
   result: RegisterResult;
   onClose: () => void;
   onViewJourney: () => void;
+  onViewTrackedBills?: () => void;
 }
 
 export const CelebrationModal = ({
   result,
   onClose,
   onViewJourney,
+  onViewTrackedBills,
 }: CelebrationModalProps) => {
   useEffect(() => {
     // 華やかな紙吹雪エフェクト
@@ -206,6 +208,16 @@ export const CelebrationModal = ({
               {daysFromPrev} <span style={{ fontSize: '12px' }}>日ぶり</span>
             </div>
           </div>
+        </div>
+
+        <div className="registration-return-note celebration-return-note" role="status">
+          <p>このお札が、どこかでまた見つかるかもしれません。</p>
+          <p>数週間したら、また旅の続きを見にきてください。</p>
+          {onViewTrackedBills && (
+            <button className="registration-return-link" onClick={onViewTrackedBills}>
+              この端末のお札を見る
+            </button>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

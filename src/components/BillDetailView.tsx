@@ -17,6 +17,9 @@ import { markTrackedBillSeen } from '../services/trackedBills';
 interface BillDetailViewProps {
   serialNumber: string;
   userUid?: string | null;
+  registrationCompleted?: boolean;
+  showTrackedBillsLink?: boolean;
+  onNavigateTrackedBills?: () => void;
   onBack: () => void;
   onRegisterAgain: (serial: string) => void;
 }
@@ -24,6 +27,9 @@ interface BillDetailViewProps {
 export const BillDetailView = ({
   serialNumber,
   userUid,
+  registrationCompleted = false,
+  showTrackedBillsLink = false,
+  onNavigateTrackedBills,
   onBack,
   onRegisterAgain,
 }: BillDetailViewProps) => {
@@ -267,6 +273,19 @@ export const BillDetailView = ({
           </div>
         </div>
       </div>
+
+      {registrationCompleted && (
+        <aside className="registration-return-note" aria-labelledby="registration-return-title" role="status">
+          <h2 id="registration-return-title">登録しました</h2>
+          <p>このお札が、どこかでまた見つかるかもしれません。</p>
+          <p>数週間したら、また旅の続きを見にきてください。</p>
+          {showTrackedBillsLink && onNavigateTrackedBills && (
+            <button className="registration-return-link" onClick={onNavigateTrackedBills}>
+              この端末のお札を見る
+            </button>
+          )}
+        </aside>
+      )}
 
       {/* 地図コンポーネント */}
       <section style={{ marginBottom: '24px' }}>
