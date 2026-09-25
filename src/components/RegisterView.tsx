@@ -368,6 +368,7 @@ export const RegisterView = ({
             onChange={(e) => setUserNote(e.target.value)}
             maxLength={60}
           />
+          <p className="input-hint">※最大60文字。個人情報や特定の日時・店舗名は避け、旅の雰囲気のみ記録してください。</p>
         </div>
 
         {/* エラー表示 */}

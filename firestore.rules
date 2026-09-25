@@ -1,0 +1,143 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // 日本円紙幣追跡「お札の旅」 Firestore Security Rules (MVP本番用)
+    // ===============================================================
+
+    // ---------------------------------------------------------------
+    // 1. bills コレクション (紙幣メタデータ)
+    // ---------------------------------------------------------------
+    match /bills/{billId} {
+      // 誰でも紙幣の検索や一覧閲覧が可能
+      allow read: if true;
+
+      // 新規紙幣の登録
+      allow create: if isValidNewBill(billId);
+
+      // 既存紙幣の再発見（トランザクションによる集計値更新）
+      allow update: if isValidBillUpdate();
+
+      // 紙幣の削除は禁止
+      allow delete: if false;
+    }
+
+    function isValidNewBill(billId) {
+      let data = request.resource.data;
+
+      return request.resource.id == billId
+        // ドキュメントIDと記番号の一致および日本銀行券の正規化形式検証
+        && data.id == billId
+        && data.serialNumber == billId
+        && data.serialNumber.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        
+        // 額面は 1000円 / 5000円 / 10000円 のいずれか
+        && data.denomination in [1000, 5000, 10000]
+        
+        // 初回登録時の初期値
+        && data.sightingsCount == 1
+        && data.totalDistanceKm == 0
+        
+        // 日時フィールド（ISO8601文字列）の検証
+        && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
+        && data.updatedAt is string && data.updatedAt.size() >= 19 && data.updatedAt.size() <= 32
+        && data.firstSightedAt is string && data.firstSightedAt.size() >= 19 && data.firstSightedAt.size() <= 32
+        && data.lastSightedAt is string && data.lastSightedAt.size() >= 19 && data.lastSightedAt.size() <= 32
+        
+        // 未知フィールドの混入防止（必要な全9フィールドのみ許可）
+        && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
+        && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt']);
+    }
+
+    function isValidBillUpdate() {
+      let current = resource.data;
+      let next = request.resource.data;
+
+      return (
+        // 改ざんを禁止する不変フィールド
+        next.id == current.id
+        && next.serialNumber == current.serialNumber
+        && next.denomination == current.denomination
+        && next.createdAt == current.createdAt
+        && next.firstSightedAt == current.firstSightedAt
+        
+        // 発見回数は現在値 + 1 のみ許可（ジャンプや減少を防止）
+        && next.sightingsCount == current.sightingsCount + 1
+        
+        // 移動距離は減少不可かつ非負数
+        && next.totalDistanceKm is number
+        && next.totalDistanceKm >= current.totalDistanceKm
+        
+        // 更新日時フィールドの検証
+        && next.updatedAt is string && next.updatedAt.size() >= 19 && next.updatedAt.size() <= 32
+        && next.lastSightedAt is string && next.lastSightedAt.size() >= 19 && next.lastSightedAt.size() <= 32
+        
+        // 未知フィールドの追加防止
+        && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
+        && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // 2. sightings コレクション (発見記録)
+    // ---------------------------------------------------------------
+    match /sightings/{sightingId} {
+      // 誰でも移動履歴の閲覧が可能
+      allow read: if true;
+
+      // 新規発見記録の登録
+      allow create: if isValidNewSighting();
+
+      // 過去の発見記録の改ざん・削除は完全禁止
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    function isValidNewSighting() {
+      let data = request.resource.data;
+      let targetBillDoc = getAfter(/databases/$(database)/documents/bills/$(data.billId));
+
+      return (
+        // トランザクションコミット後に対応する bills/{billId} が存在すること
+        existsAfter(/databases/$(database)/documents/bills/$(data.billId))
+        
+        // トランザクション整合性: sightingのstepとbillのsightingsCountが完全に連動していること
+        && data.step == targetBillDoc.data.sightingsCount
+        
+        // 基本フィールド型とフォーマット
+        && data.id is string
+        && data.billId is string && data.billId.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && data.step is int && data.step >= 1
+        
+        // 地域（市区町村レベル）
+        && data.prefecture is string && data.prefecture.size() >= 2 && data.prefecture.size() <= 10
+        && data.municipality is string && data.municipality.size() >= 1 && data.municipality.size() <= 50
+        
+        // 概算座標範囲（世界標準範囲）
+        && data.latitudeApprox is number && data.latitudeApprox >= -90.0 && data.latitudeApprox <= 90.0
+        && data.longitudeApprox is number && data.longitudeApprox >= -180.0 && data.longitudeApprox <= 180.0
+        
+        // 移動・経過メトリクス（非負数）
+        && data.distanceFromPrevKm is number && data.distanceFromPrevKm >= 0
+        && data.daysFromPrev is number && data.daysFromPrev >= 0
+        
+        // 日時文字列（ISO8601）
+        && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
+        
+        // 旅メモ（任意入力・最大100文字）
+        && (!('userNote' in data) || (data.userNote is string && data.userNote.size() <= 100))
+        
+        // フィールドキーの完全一致
+        && data.keys().hasAll(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
+        && data.keys().hasOnly(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])
+      );
+    }
+
+    // デフォルト: 他のコレクションへのアクセスは拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
