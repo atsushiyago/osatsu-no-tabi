@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Search, Compass, ArrowRight } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
 import { normalizeSerialInput, formatSerialDisplay } from '../utils/serial';
-import { prepareSerialSearch } from '../utils/serialSearch';
+import { runValidatedSerialSearch } from '../utils/serialSearch';
 import { isDebugTiming } from '../utils/debug';
 
 interface SearchViewProps {
@@ -15,6 +15,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const isComposing = useRef(false);
 
   const normSerial = normalizeSerialInput(searchInput);
@@ -23,23 +24,33 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
     const input = form.elements.namedItem('serial') as HTMLInputElement | null;
-    const { rawInput, serial, documentId } = prepareSerialSearch(input?.value ?? searchInput);
-    if (!serial) return;
+    const rawInput = input?.value ?? searchInput;
+    const normalizedSerial = normalizeSerialInput(rawInput);
+    if (!normalizedSerial) return;
 
     if (isDebugTiming()) {
       console.debug('[Search Debug] raw input=', rawInput);
-      console.debug('[Search Debug] normalized input=', serial);
-      console.debug('[Search Debug] search serial=', serial);
-      console.debug('[Search Debug] target document ID=', documentId);
+      console.debug('[Search Debug] normalized input=', normalizedSerial);
+      console.debug('[Search Debug] search serial=', normalizedSerial);
+      console.debug('[Search Debug] target document ID=', normalizedSerial);
     }
 
-    setIsSearching(true);
     setNotFound(false);
-    setSearchInput(serial);
-    setSearchedSerial(serial);
+    setIsSearching(true);
+    setValidationError(null);
+    setSearchInput(normalizedSerial);
+    setSearchedSerial(normalizedSerial);
 
     try {
-      const bill = await getBillBySerial(documentId);
+      const searchResult = await runValidatedSerialSearch(rawInput, getBillBySerial);
+      if (searchResult.status === 'invalid') {
+        setValidationError(searchResult.request.validationMessage ?? '記番号の形式を確認してください。');
+        setSearchedSerial(null);
+        return;
+      }
+
+      const { serial } = searchResult.request;
+      const bill = searchResult.result;
       if (bill) {
         onBillFound(serial);
       } else {
@@ -85,12 +96,14 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               onChange={(e) => {
                 setSearchInput(isComposing.current ? e.target.value : normalizeSerialInput(e.target.value));
                 setNotFound(false);
+                setValidationError(null);
               }}
               onCompositionStart={() => { isComposing.current = true; }}
               onCompositionEnd={(e) => {
                 isComposing.current = false;
                 setSearchInput(normalizeSerialInput(e.currentTarget.value));
                 setNotFound(false);
+                setValidationError(null);
               }}
               maxLength={12}
               inputMode="text"
@@ -119,6 +132,12 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           <span>{isSearching ? '検索中...' : 'このお札の旅を調べる'}</span>
         </button>
       </form>
+
+      {validationError && (
+        <p role="alert" style={{ color: '#9f3b2f', fontSize: '14px', margin: '-8px 0 20px' }}>
+          {validationError}
+        </p>
+      )}
 
       {/* 検索結果なしの場合 */}
       {notFound && searchedSerial && (
