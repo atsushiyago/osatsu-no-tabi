@@ -5,6 +5,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   runTransaction,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
@@ -18,6 +19,19 @@ import type {
 } from '../types';
 import { calculateDistanceKm } from '../utils/geo';
 import { normalizeSerialNumber } from '../utils/serial';
+
+/**
+ * Firestore書き込み用データから undefined のフィールドを除外するヘルパー
+ */
+function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
 
 // 初期サンプルデータ（Where's George 日本版の代表ストーリー）
 const INITIAL_SAMPLE_BILLS: Bill[] = [
@@ -196,41 +210,37 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
   if (!normSerial) return null;
 
   if (isFirebaseConfigured && db) {
-    try {
-      const billsRef = collection(db, 'bills');
-      const q = query(billsRef, where('serialNumber', '==', normSerial));
-      const snap = await getDocs(q);
+    const billsRef = collection(db, 'bills');
+    const q = query(billsRef, where('serialNumber', '==', normSerial));
+    const snap = await getDocs(q);
 
-      if (snap.empty) {
-        return null;
-      }
-
-      const billDoc = snap.docs[0];
-      const bill = { id: billDoc.id, ...billDoc.data() } as Bill;
-
-      // 発見記録を取得
-      const sightingsRef = collection(db, 'sightings');
-      const sq = query(
-        sightingsRef,
-        where('billId', '==', bill.id),
-        orderBy('step', 'asc')
-      );
-      const sSnap = await getDocs(sq);
-      const sightings = sSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as Sighting[];
-
-      return {
-        ...bill,
-        sightings,
-      };
-    } catch (err) {
-      console.warn('Firestore fetch failed, checking local store:', err);
+    if (snap.empty) {
+      return null;
     }
+
+    const billDoc = snap.docs[0];
+    const bill = { id: billDoc.id, ...billDoc.data() } as Bill;
+
+    // 発見記録を取得
+    const sightingsRef = collection(db, 'sightings');
+    const sq = query(
+      sightingsRef,
+      where('billId', '==', bill.id),
+      orderBy('step', 'asc')
+    );
+    const sSnap = await getDocs(sq);
+    const sightings = sSnap.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+    })) as Sighting[];
+
+    return {
+      ...bill,
+      sightings,
+    };
   }
 
-  // フォールバック（ローカルリポジトリ）
+  // Firebase未設定時のみのデモモード（ローカルリポジトリ）
   const { bills, sightings } = getLocalData();
   const bill = bills.find((b) => b.serialNumber === normSerial);
   if (!bill) return null;
@@ -253,149 +263,147 @@ export async function registerBillSighting(
 ): Promise<RegisterResult> {
   const normSerial = normalizeSerialNumber(input.serialNumber);
   const nowIso = new Date().toISOString();
+  const trimmedNote = input.userNote?.trim();
 
   if (isFirebaseConfigured && db) {
-    try {
-      const billId = normSerial; // 一意なキーとして正規化記番号を活用（ハッシュ化も可能）
-      const billRef = doc(db, 'bills', billId);
-      const sightingsColRef = collection(db, 'sightings');
+    // Firebase設定時はFirestoreで実行し、エラー時は隠さずそのままthrowする
+    const billId = normSerial; // 一意なキーとして正規化記番号を活用
+    const billRef = doc(db, 'bills', billId);
+    const sightingsColRef = collection(db, 'sightings');
 
-      const txResult = await runTransaction(db, async (txn) => {
-        const billSnap = await txn.get(billRef);
+    const txResult = await runTransaction(db, async (txn) => {
+      const billSnap = await txn.get(billRef);
 
-        if (billSnap.exists()) {
-          // 既に登録されている紙幣（再発見！）
-          const currentBill = billSnap.data() as Bill;
+      if (billSnap.exists()) {
+        // 既に登録されている紙幣（再発見！）
+        const currentBill = billSnap.data() as Bill;
 
-          // 直前の発見を取得
-          const sq = query(
-            sightingsColRef,
-            where('billId', '==', billId),
-            orderBy('step', 'asc')
-          );
-          const sSnap = await getDocs(sq);
-          const existingSightings = sSnap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          })) as Sighting[];
+        // 直前の発見を取得
+        const sq = query(
+          sightingsColRef,
+          where('billId', '==', billId),
+          orderBy('step', 'asc')
+        );
+        const sSnap = await getDocs(sq);
+        const existingSightings = sSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Sighting[];
 
-          const lastSighting = existingSightings[existingSightings.length - 1];
-          const distKm = lastSighting
-            ? calculateDistanceKm(
-                lastSighting.latitudeApprox,
-                lastSighting.longitudeApprox,
-                input.latitudeApprox,
-                input.longitudeApprox
+        const lastSighting = existingSightings[existingSightings.length - 1];
+        const distKm = lastSighting
+          ? calculateDistanceKm(
+              lastSighting.latitudeApprox,
+              lastSighting.longitudeApprox,
+              input.latitudeApprox,
+              input.longitudeApprox
+            )
+          : 0;
+
+        const daysDiff = lastSighting
+          ? Math.max(
+              0,
+              Math.round(
+                (new Date(nowIso).getTime() - new Date(lastSighting.createdAt).getTime()) /
+                  (1000 * 60 * 60 * 24)
               )
-            : 0;
+            )
+          : 0;
 
-          const daysDiff = lastSighting
-            ? Math.max(
-                0,
-                Math.round(
-                  (new Date(nowIso).getTime() - new Date(lastSighting.createdAt).getTime()) /
-                    (1000 * 60 * 60 * 24)
-                )
-              )
-            : 0;
+        const newStep = (currentBill.sightingsCount || existingSightings.length) + 1;
+        const newTotalDist = (currentBill.totalDistanceKm || 0) + distKm;
 
-          const newStep = (currentBill.sightingsCount || existingSightings.length) + 1;
-          const newTotalDist = (currentBill.totalDistanceKm || 0) + distKm;
+        const sightingDocRef = doc(sightingsColRef);
+        // undefined を含めないよう、userNoteが存在する場合のみプロパティを含める
+        const newSighting: Sighting = {
+          id: sightingDocRef.id,
+          billId,
+          step: newStep,
+          prefecture: input.prefecture,
+          municipality: input.municipality,
+          latitudeApprox: input.latitudeApprox,
+          longitudeApprox: input.longitudeApprox,
+          createdAt: nowIso,
+          distanceFromPrevKm: distKm,
+          daysFromPrev: daysDiff,
+          ...(trimmedNote ? { userNote: trimmedNote } : {}),
+        };
 
-          const sightingDocRef = doc(sightingsColRef);
-          const newSighting: Sighting = {
-            id: sightingDocRef.id,
-            billId,
-            step: newStep,
-            prefecture: input.prefecture,
-            municipality: input.municipality,
-            latitudeApprox: input.latitudeApprox,
-            longitudeApprox: input.longitudeApprox,
-            userNote: input.userNote?.trim() || undefined,
-            createdAt: nowIso,
-            distanceFromPrevKm: distKm,
-            daysFromPrev: daysDiff,
-          };
+        txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
 
-          txn.set(sightingDocRef, newSighting);
+        const finalBill: Bill = {
+          ...currentBill,
+          denomination: input.denomination, // 更新
+          updatedAt: nowIso,
+          sightingsCount: newStep,
+          totalDistanceKm: newTotalDist,
+          lastSightedAt: nowIso,
+        };
 
-          const finalBill: Bill = {
-            ...currentBill,
-            denomination: input.denomination, // 更新
-            updatedAt: nowIso,
-            sightingsCount: newStep,
-            totalDistanceKm: newTotalDist,
-            lastSightedAt: nowIso,
-          };
+        txn.update(billRef, sanitizeFirestoreData({
+          denomination: input.denomination,
+          updatedAt: nowIso,
+          sightingsCount: newStep,
+          totalDistanceKm: newTotalDist,
+          lastSightedAt: nowIso,
+        }));
 
-          txn.update(billRef, {
-            denomination: input.denomination,
-            updatedAt: nowIso,
-            sightingsCount: newStep,
-            totalDistanceKm: newTotalDist,
-            lastSightedAt: nowIso,
-          });
+        return {
+          isRediscovery: true,
+          bill: finalBill,
+          newSighting,
+          allSightings: [...existingSightings, newSighting],
+          sightingsCount: newStep,
+          distanceFromPrevKm: distKm,
+          daysFromPrev: daysDiff,
+        };
+      } else {
+        // 初回登録
+        const finalBill: Bill = {
+          id: billId,
+          serialNumber: normSerial,
+          denomination: input.denomination,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          sightingsCount: 1,
+          totalDistanceKm: 0,
+          firstSightedAt: nowIso,
+          lastSightedAt: nowIso,
+        };
 
-          return {
-            isRediscovery: true,
-            bill: finalBill,
-            newSighting,
-            allSightings: [...existingSightings, newSighting],
-            sightingsCount: newStep,
-            distanceFromPrevKm: distKm,
-            daysFromPrev: daysDiff,
-          };
-        } else {
-          // 初回登録
-          const finalBill: Bill = {
-            id: billId,
-            serialNumber: normSerial,
-            denomination: input.denomination,
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            sightingsCount: 1,
-            totalDistanceKm: 0,
-            firstSightedAt: nowIso,
-            lastSightedAt: nowIso,
-          };
+        txn.set(billRef, sanitizeFirestoreData(finalBill));
 
-          txn.set(billRef, finalBill);
+        const sightingDocRef = doc(sightingsColRef);
+        // undefined を含めないよう、userNoteが存在する場合のみプロパティを含める
+        const newSighting: Sighting = {
+          id: sightingDocRef.id,
+          billId,
+          step: 1,
+          prefecture: input.prefecture,
+          municipality: input.municipality,
+          latitudeApprox: input.latitudeApprox,
+          longitudeApprox: input.longitudeApprox,
+          createdAt: nowIso,
+          distanceFromPrevKm: 0,
+          daysFromPrev: 0,
+          ...(trimmedNote ? { userNote: trimmedNote } : {}),
+        };
 
-          const sightingDocRef = doc(sightingsColRef);
-          const newSighting: Sighting = {
-            id: sightingDocRef.id,
-            billId,
-            step: 1,
-            prefecture: input.prefecture,
-            municipality: input.municipality,
-            latitudeApprox: input.latitudeApprox,
-            longitudeApprox: input.longitudeApprox,
-            userNote: input.userNote?.trim() || undefined,
-            createdAt: nowIso,
-            distanceFromPrevKm: 0,
-            daysFromPrev: 0,
-          };
+        txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
 
-          txn.set(sightingDocRef, newSighting);
-
-          return {
-            isRediscovery: false,
-            bill: finalBill,
-            newSighting,
-            allSightings: [newSighting],
-            sightingsCount: 1,
-            distanceFromPrevKm: 0,
-            daysFromPrev: 0,
-          };
-        }
-      });
-
-      if (txResult) {
-        return txResult;
+        return {
+          isRediscovery: false,
+          bill: finalBill,
+          newSighting,
+          allSightings: [newSighting],
+          sightingsCount: 1,
+          distanceFromPrevKm: 0,
+          daysFromPrev: 0,
+        };
       }
-    } catch (err) {
-      console.warn('Firestore transaction failed, falling back to local save:', err);
-    }
+    });
+
+    return txResult;
   }
 
   // ローカルリポジトリでの処理
@@ -517,50 +525,46 @@ export async function registerBillSighting(
  */
 export async function getGlobalStats(): Promise<GlobalStats> {
   if (isFirebaseConfigured && db) {
-    try {
-      const billsRef = collection(db, 'bills');
-      const snap = await getDocs(billsRef);
+    const billsRef = collection(db, 'bills');
+    const snap = await getDocs(billsRef);
 
-      const totalBills = snap.size;
-      let totalSightings = 0;
-      let rediscoveredBills = 0;
-      let maxDistanceKm = 0;
-      let longestJourneyDays = 0;
+    const totalBills = snap.size;
+    let totalSightings = 0;
+    let rediscoveredBills = 0;
+    let maxDistanceKm = 0;
+    let longestJourneyDays = 0;
 
-      snap.forEach((docSnap) => {
-        const data = docSnap.data() as Bill;
-        const count = data.sightingsCount || 1;
-        totalSightings += count;
-        if (count >= 2) {
-          rediscoveredBills += 1;
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Bill;
+      const count = data.sightingsCount || 1;
+      totalSightings += count;
+      if (count >= 2) {
+        rediscoveredBills += 1;
+      }
+      if ((data.totalDistanceKm || 0) > maxDistanceKm) {
+        maxDistanceKm = data.totalDistanceKm;
+      }
+      if (data.firstSightedAt && data.lastSightedAt) {
+        const days = Math.round(
+          (new Date(data.lastSightedAt).getTime() - new Date(data.firstSightedAt).getTime()) /
+            (1000 * 60 * 60 * 24)
+        );
+        if (days > longestJourneyDays) {
+          longestJourneyDays = days;
         }
-        if ((data.totalDistanceKm || 0) > maxDistanceKm) {
-          maxDistanceKm = data.totalDistanceKm;
-        }
-        if (data.firstSightedAt && data.lastSightedAt) {
-          const days = Math.round(
-            (new Date(data.lastSightedAt).getTime() - new Date(data.firstSightedAt).getTime()) /
-              (1000 * 60 * 60 * 24)
-          );
-          if (days > longestJourneyDays) {
-            longestJourneyDays = days;
-          }
-        }
-      });
+      }
+    });
 
-      return {
-        totalBills,
-        totalSightings,
-        rediscoveredBills,
-        maxDistanceKm,
-        longestJourneyDays,
-      };
-    } catch (err) {
-      console.warn('Firestore stats failed, fallback to local:', err);
-    }
+    return {
+      totalBills,
+      totalSightings,
+      rediscoveredBills,
+      maxDistanceKm,
+      longestJourneyDays,
+    };
   }
 
-  // ローカルデータより計算
+  // Firebase未設定時のデモモード（ローカルリポジトリ）
   const { bills } = getLocalData();
   const totalBills = bills.length;
   let totalSightings = 0;
@@ -600,9 +604,37 @@ export async function getGlobalStats(): Promise<GlobalStats> {
  * 直近旅したお札の最新リストを取得（トップページ等のティッカー用）
  */
 export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightings[]> {
+  if (isFirebaseConfigured && db) {
+    const billsRef = collection(db, 'bills');
+    const q = query(billsRef, orderBy('updatedAt', 'desc'), limit(limitCount));
+    const snap = await getDocs(q);
+
+    const journeys: BillWithSightings[] = [];
+    for (const docSnap of snap.docs) {
+      const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
+      const sightingsRef = collection(db, 'sightings');
+      const sq = query(
+        sightingsRef,
+        where('billId', '==', bill.id),
+        orderBy('step', 'asc')
+      );
+      const sSnap = await getDocs(sq);
+      const sightings = sSnap.docs.map((sDoc) => ({
+        id: sDoc.id,
+        ...sDoc.data(),
+      })) as Sighting[];
+
+      journeys.push({
+        ...bill,
+        sightings,
+      });
+    }
+
+    return journeys;
+  }
+
+  // Firebase未設定時のデモモード
   const { bills, sightings } = getLocalData();
-  
-  // 複数回発見されている紙幣を優先、更新日時が新しい順
   const sortedBills = [...bills]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, limitCount);
