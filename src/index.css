@@ -1,38 +1,37 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap');
-
 :root {
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #eff6ff;
-  --primary-border: #bfdbfe;
+  --primary: #9f3b2f;
+  --primary-hover: #7f2f27;
+  --primary-light: #f8ebe7;
+  --primary-border: #d8a89f;
   
-  --secondary: #0d9488;
-  --accent: #f59e0b;
-  --success: #10b981;
-  --danger: #ef4444;
+  --secondary: #365d4a;
+  --accent: #aa7d32;
+  --success: #3f7656;
+  --danger: #a3362c;
 
-  --bg-main: #f8fafc;
-  --bg-card: #ffffff;
-  --bg-subtle: #f1f5f9;
+  --bg-main: #f3efe5;
+  --bg-card: #fbf9f3;
+  --bg-subtle: #eae4d7;
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-primary: #282a27;
+  --text-secondary: #494b46;
+  --text-muted: #62645e;
 
-  --border-light: #e2e8f0;
-  --border-focus: #3b82f6;
+  --border-light: #d8d1c4;
+  --border-focus: #9f3b2f;
 
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-full: 9999px;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 12px 30px -4px rgba(0, 0, 0, 0.12);
 
-  font-family: 'Zen Kaku Gothic New', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
   font-weight: 400;
   color: var(--text-primary);
   background-color: var(--bg-main);
@@ -504,4 +503,99 @@ body {
 .leaflet-container {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* 読みやすさと「旅の記録帳」らしい落ち着いた基調 */
+body, .app-container { background: var(--bg-main); }
+.app-container {
+  width: 100%;
+  max-width: 960px;
+  box-shadow: none;
+  border-inline: 1px solid var(--border-light);
+}
+.header, .bottom-nav {
+  background: var(--bg-card);
+  backdrop-filter: none;
+}
+.header div[style*="font-size: 10px"] { font-size: 14px !important; color: var(--text-secondary) !important; }
+.bottom-nav { max-width: 960px; box-shadow: none; }
+.brand-icon, .stats-container { background: var(--primary); }
+.btn-primary { background: var(--primary) !important; color: #fff !important; }
+.brand-icon { border-radius: 5px; box-shadow: none; }
+.btn-primary {
+  min-height: 52px;
+  border-radius: 6px;
+  font-size: 18px;
+  box-shadow: none;
+}
+.btn-secondary { min-height: 50px; border-radius: 6px; font-size: 17px; }
+.hero-tag { background: #eee5d5; border-color: #d8c9ae; border-radius: 4px; color: #54462f; font-size: 15px; }
+.hero-title { font-size: clamp(30px, 7vw, 38px); color: var(--text-primary); }
+.hero-desc { font-size: 17px; color: var(--text-secondary); }
+.stats-container { background: var(--bg-card); border-color: var(--border-light); border-radius: 6px; }
+.stats-title { font-size: 17px; color: var(--text-primary); }
+.stat-card { border-radius: 4px; box-shadow: none; background: transparent; border: 0; border-top: 1px solid var(--border-light); }
+.stat-label { color: var(--text-secondary); font-size: 15px; }
+.stat-value { color: var(--text-primary); font-size: 25px; }
+.manner-notice { background: #eee9dc; border-color: #cfc4ad; border-radius: 6px; }
+.manner-title { color: #593d1e; font-size: 16px; }
+.manner-text { color: #403d36; font-size: 15px; }
+.form-card { background: var(--bg-card); border-color: var(--border-light); border-radius: 6px; box-shadow: none; }
+.form-label { color: var(--text-primary); font-size: 17px; }
+.form-label-badge { color: #583c32; background: #eee5d5; font-size: 14px; border-radius: 3px; padding: 3px 8px; }
+.denom-btn { border-radius: 5px; }
+.denom-yen { font-size: 18px; }
+.denom-label { color: var(--text-secondary); font-size: 14px; }
+.text-input { min-height: 52px; border-color: #a9a294; border-radius: 5px; font-size: 18px; }
+.text-input.code-font { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 23px; }
+.input-hint { color: #494b46; font-size: 15px; }
+.timeline-card { background: var(--bg-card); border-color: var(--border-light); border-radius: 5px; }
+.nav-item { color: #494b46; min-width: 72px; min-height: 48px; border-radius: 4px; font-size: 14px; }
+.nav-item.active { color: #742b23; background: #f0e1d9; }
+.sample-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid #8a5b17;
+  border-radius: 3px;
+  color: #56390d;
+  background: #f1e5c8;
+  font-size: 15px;
+  font-weight: 800;
+}
+.journey-row {
+  background: var(--bg-card) !important;
+  border-color: var(--border-light) !important;
+  border-radius: 5px !important;
+  box-shadow: none !important;
+  min-height: 68px;
+}
+.location-privacy-note { margin: -2px 0 12px; color: #3f5847 !important; font-size: 15px !important; font-weight: 600; }
+.location-form-label { align-items: flex-start; gap: 8px; }
+.location-form-label .form-label-badge { flex: 0 0 auto; }
+.bill-detail-hero {
+  background: #334f40 !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.bill-detail-hero > div[style*="position: absolute"] { display: none; }
+.leaflet-container { font-family: inherit; }
+.app-container button { min-height: 44px; }
+.app-container [style*="font-size: 10px"],
+.app-container [style*="font-size: 11px"],
+.app-container [style*="font-size: 12px"],
+.app-container [style*="font-size: 13px"],
+.app-container [style*="font-size: 14px"] { font-size: 15px !important; }
+.app-container p[style*="font-size"], .app-container span[style*="font-size"] { color: var(--text-secondary); }
+.app-container h2[style], .app-container h3[style] { color: var(--text-primary) !important; font-size: 22px !important; }
+.app-container button:focus-visible, .app-container [role="button"]:focus-visible, .app-container input:focus-visible {
+  outline: 3px solid #8d3026;
+  outline-offset: 2px;
+}
+@media (max-width: 420px) {
+  .main-content { padding-inline: 14px; }
+  .form-card { padding: 18px 14px; }
+  .stats-container { padding: 14px 12px; }
+  .stats-grid { gap: 8px; }
 }

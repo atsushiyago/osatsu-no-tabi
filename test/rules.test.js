@@ -7,6 +7,8 @@ import {
   getDoc,
   getDocs,
   runTransaction,
+  serverTimestamp,
+  Timestamp,
   deleteDoc,
   updateDoc,
 } from 'firebase/firestore';
@@ -44,6 +46,37 @@ async function assertReject(name, fn) {
   }
 }
 
+async function setTrustedClockForTest(billId, isoTime) {
+  const url = `http://127.0.0.1:8080/v1/projects/demo-george-rules-test/databases/(default)/documents/bills/${billId}?updateMask.fieldPaths=lastSightedAtServer`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { lastSightedAtServer: { timestampValue: isoTime } } }),
+  });
+  if (!response.ok) throw new Error(`Emulator fixture clock update failed: ${response.status} ${await response.text()}`);
+}
+
+async function seedLegacyBillForTest(billId, isoTime) {
+  const url = `http://127.0.0.1:8080/v1/projects/demo-george-rules-test/databases/(default)/documents/bills?documentId=${billId}`;
+  const fields = {
+    id: { stringValue: billId },
+    serialNumber: { stringValue: billId },
+    denomination: { integerValue: '1000' },
+    createdAt: { stringValue: isoTime },
+    updatedAt: { stringValue: isoTime },
+    sightingsCount: { integerValue: '1' },
+    totalDistanceKm: { integerValue: '0' },
+    firstSightedAt: { stringValue: isoTime },
+    lastSightedAt: { stringValue: isoTime },
+  };
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!response.ok) throw new Error(`Legacy fixture create failed: ${response.status} ${await response.text()}`);
+}
+
 async function runTests() {
   console.log('=== Firestore Security Rules 網羅テスト開始 ===\n');
 
@@ -65,6 +98,7 @@ async function runTests() {
         totalDistanceKm: 0,
         firstSightedAt: nowIso,
         lastSightedAt: nowIso,
+        lastSightedAtServer: serverTimestamp(),
       });
 
       txn.set(sightRef1, {
@@ -83,6 +117,45 @@ async function runTests() {
     });
   });
 
+  const otherBillId = 'CD654321A';
+  const otherBillRef = doc(db, 'bills', otherBillId);
+  const otherSightingRef = doc(collection(db, 'sightings'));
+  await assertPass('別紙幣は15分以内でも初回登録できる', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.set(otherBillRef, {
+        id: otherBillId, serialNumber: otherBillId, denomination: 1000,
+        createdAt: nowIso, updatedAt: nowIso, sightingsCount: 1,
+        totalDistanceKm: 0, firstSightedAt: nowIso, lastSightedAt: nowIso,
+        lastSightedAtServer: serverTimestamp(),
+      });
+      txn.set(otherSightingRef, {
+        id: otherSightingRef.id, billId: otherBillId, step: 1,
+        prefecture: '東京都', municipality: '千代田区', latitudeApprox: 35.6938,
+        longitudeApprox: 139.7532, createdAt: nowIso, distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
+    });
+  });
+
+  const legacyBillId = 'EF123456A';
+  const legacyBillRef = doc(db, 'bills', legacyBillId);
+  await seedLegacyBillForTest(legacyBillId, nowIso);
+  await assertPass('既存legacy billはサーバー時刻を初期化できる', async () => {
+    await runTransaction(db, async (txn) => {
+      const snap = await txn.get(legacyBillRef);
+      if (!snap.exists()) throw new Error('Legacy bill fixture missing');
+      txn.update(legacyBillRef, { lastSightedAtServer: serverTimestamp() });
+    });
+  });
+  await assertReject('legacy bill移行後も15分以内の再投稿は拒否', async () => {
+    await updateDoc(legacyBillRef, {
+      updatedAt: new Date().toISOString(),
+      sightingsCount: 2,
+      totalDistanceKm: 0,
+      lastSightedAt: new Date().toISOString(),
+      lastSightedAtServer: serverTimestamp(),
+    });
+  });
+
   // 2. 正常な読み取り
   await assertPass('bills の公開読み取り', async () => {
     const snap = await getDoc(billRef);
@@ -96,13 +169,33 @@ async function runTests() {
 
   // 3. 正常な再発見トランザクション (bill更新 + 第2足跡sighting)
   const sightRef2 = doc(collection(db, 'sightings'));
-  await assertPass('正常な再発見トランザクション (bill更新 sightingsCount:2 + sighting step:2)', async () => {
+  await assertReject('同一紙幣の15分以内再投稿拒否', async () => {
     await runTransaction(db, async (txn) => {
       txn.update(billRef, {
         updatedAt: new Date().toISOString(),
         sightingsCount: 2,
         totalDistanceKm: 350,
         lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: serverTimestamp(),
+      });
+      txn.set(sightRef2, {
+        id: sightRef2.id, billId: testBillId, step: 2,
+        prefecture: '愛知県', municipality: '名古屋市', latitudeApprox: 35.1816,
+        longitudeApprox: 136.9066, createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 350, daysFromPrev: 10,
+      });
+    });
+  });
+
+  await setTrustedClockForTest(testBillId, '2000-01-01T00:00:00.000Z');
+  await assertPass('同一紙幣15分超の再投稿は許可', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(billRef, {
+        updatedAt: new Date().toISOString(),
+        sightingsCount: 2,
+        totalDistanceKm: 350,
+        lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: serverTimestamp(),
       });
 
       txn.set(sightRef2, {
@@ -116,6 +209,23 @@ async function runTests() {
         createdAt: new Date().toISOString(),
         distanceFromPrevKm: 350,
         daysFromPrev: 10,
+      });
+    });
+  });
+
+  await assertReject('クライアントが過去の時刻を偽装してもクールダウンを回避できない', async () => {
+    const forgedSight = doc(collection(db, 'sightings'));
+    await runTransaction(db, async (txn) => {
+      txn.update(billRef, {
+        updatedAt: new Date().toISOString(), sightingsCount: 3,
+        totalDistanceKm: 500, lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: Timestamp.fromDate(new Date('2000-01-01T00:00:00.000Z')),
+      });
+      txn.set(forgedSight, {
+        id: forgedSight.id, billId: testBillId, step: 3,
+        prefecture: '東京都', municipality: '千代田区', latitudeApprox: 35.6938,
+        longitudeApprox: 139.7532, createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 150, daysFromPrev: 1,
       });
     });
   });
@@ -137,6 +247,7 @@ async function runTests() {
         totalDistanceKm: 0,
         firstSightedAt: nowIso,
         lastSightedAt: nowIso,
+        lastSightedAtServer: serverTimestamp(),
       });
 
       txn.set(sight5000_1, {
@@ -183,6 +294,7 @@ async function runTests() {
 
   // 3-D. 成功: 正しい5000円（または denomination を更新せず維持）での再発見は成功
   const goodSight5000_2 = doc(collection(db, 'sightings'));
+  await setTrustedClockForTest(bill5000Id, '2000-01-01T00:00:00.000Z');
   await assertPass('正しい5000円での再発見トランザクションは成功', async () => {
     await runTransaction(db, async (txn) => {
       txn.update(bill5000Ref, {
@@ -190,6 +302,7 @@ async function runTests() {
         sightingsCount: 2,
         totalDistanceKm: 50,
         lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: serverTimestamp(),
       });
 
       txn.set(goodSight5000_2, {

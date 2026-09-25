@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  serverTimestamp,
   getDocs,
   query,
   where,
@@ -9,6 +10,7 @@ import {
   runTransaction,
   getAggregateFromServer,
   getCountFromServer,
+  Timestamp,
   count,
   sum,
 } from 'firebase/firestore';
@@ -38,142 +40,6 @@ function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
   return result as T;
 }
 
-// 初期サンプルデータ（Where's George 日本版の代表ストーリー）
-const INITIAL_SAMPLE_BILLS: Bill[] = [
-  {
-    id: 'AA123456B',
-    serialNumber: 'AA123456B',
-    denomination: 1000,
-    createdAt: '2026-09-25T10:00:00.000Z',
-    updatedAt: '2026-12-17T15:30:00.000Z',
-    sightingsCount: 4,
-    totalDistanceKm: 520,
-    firstSightedAt: '2026-09-25T10:00:00.000Z',
-    lastSightedAt: '2026-12-17T15:30:00.000Z',
-  },
-  {
-    id: 'BC987654A',
-    serialNumber: 'BC987654A',
-    denomination: 10000,
-    createdAt: '2026-08-10T12:00:00.000Z',
-    updatedAt: '2026-11-05T09:15:00.000Z',
-    sightingsCount: 2,
-    totalDistanceKm: 890,
-    firstSightedAt: '2026-08-10T12:00:00.000Z',
-    lastSightedAt: '2026-11-05T09:15:00.000Z',
-  },
-  {
-    id: 'MN555666D',
-    serialNumber: 'MN555666D',
-    denomination: 5000,
-    createdAt: '2026-09-01T08:20:00.000Z',
-    updatedAt: '2026-09-01T08:20:00.000Z',
-    sightingsCount: 1,
-    totalDistanceKm: 0,
-    firstSightedAt: '2026-09-01T08:20:00.000Z',
-    lastSightedAt: '2026-09-01T08:20:00.000Z',
-  },
-];
-
-const INITIAL_SAMPLE_SIGHTINGS: Sighting[] = [
-  // AA123456B の旅（大和市 → 新宿区 → 名古屋市 → 京都市）
-  {
-    id: 'sight-aa1-1',
-    billId: 'AA123456B',
-    step: 1,
-    prefecture: '神奈川県',
-    municipality: '大和市',
-    latitudeApprox: 35.4883,
-    longitudeApprox: 139.4628,
-    userNote: '駅前のベーカリーでお釣りとして受け取りました！',
-    createdAt: '2026-09-25T10:00:00.000Z',
-    distanceFromPrevKm: 0,
-    daysFromPrev: 0,
-  },
-  {
-    id: 'sight-aa1-2',
-    billId: 'AA123456B',
-    step: 2,
-    prefecture: '東京都',
-    municipality: '新宿区',
-    latitudeApprox: 35.6938,
-    longitudeApprox: 139.7034,
-    userNote: '新宿の書店で本を買った際のお釣りでした。',
-    createdAt: '2026-10-02T14:15:00.000Z',
-    distanceFromPrevKm: 32,
-    daysFromPrev: 7,
-  },
-  {
-    id: 'sight-aa1-3',
-    billId: 'AA123456B',
-    step: 3,
-    prefecture: '愛知県',
-    municipality: '名古屋市',
-    latitudeApprox: 35.1815,
-    longitudeApprox: 136.9066,
-    userNote: '出張先の名古屋名物きしめん屋で発見！',
-    createdAt: '2026-10-21T18:45:00.000Z',
-    distanceFromPrevKm: 262,
-    daysFromPrev: 19,
-  },
-  {
-    id: 'sight-aa1-4',
-    billId: 'AA123456B',
-    step: 4,
-    prefecture: '京都府',
-    municipality: '京都市',
-    latitudeApprox: 35.0116,
-    longitudeApprox: 135.7681,
-    userNote: '紅葉狩りの途中のカフェで出会いました。どこまで旅するかな？',
-    createdAt: '2026-12-17T15:30:00.000Z',
-    distanceFromPrevKm: 107,
-    daysFromPrev: 57,
-  },
-
-  // BC987654A の旅（福岡市 → 札幌市）
-  {
-    id: 'sight-bc1-1',
-    billId: 'BC987654A',
-    step: 1,
-    prefecture: '福岡県',
-    municipality: '福岡市',
-    latitudeApprox: 33.5904,
-    longitudeApprox: 130.4017,
-    userNote: '博多駅の売店にて。',
-    createdAt: '2026-08-10T12:00:00.000Z',
-    distanceFromPrevKm: 0,
-    daysFromPrev: 0,
-  },
-  {
-    id: 'sight-bc1-2',
-    billId: 'BC987654A',
-    step: 2,
-    prefecture: '北海道',
-    municipality: '札幌市',
-    latitudeApprox: 43.0642,
-    longitudeApprox: 141.3469,
-    userNote: '北海道へロングトラベル！びっくりしました。',
-    createdAt: '2026-11-05T09:15:00.000Z',
-    distanceFromPrevKm: 1420,
-    daysFromPrev: 87,
-  },
-
-  // MN555666D (仙台市)
-  {
-    id: 'sight-mn1-1',
-    billId: 'MN555666D',
-    step: 1,
-    prefecture: '宮城県',
-    municipality: '仙台市',
-    latitudeApprox: 38.2682,
-    longitudeApprox: 140.8694,
-    userNote: '初登録です。これから全国を旅してほしい！',
-    createdAt: '2026-09-01T08:20:00.000Z',
-    distanceFromPrevKm: 0,
-    daysFromPrev: 0,
-  },
-];
-
 const LOCAL_STORAGE_BILLS_KEY = 'osatsu_bills_repo';
 const LOCAL_STORAGE_SIGHTINGS_KEY = 'osatsu_sightings_repo';
 
@@ -182,19 +48,19 @@ function getLocalData(): { bills: Bill[]; sightings: Sighting[] } {
     const billsRaw = localStorage.getItem(LOCAL_STORAGE_BILLS_KEY);
     const sightingsRaw = localStorage.getItem(LOCAL_STORAGE_SIGHTINGS_KEY);
 
-    let bills: Bill[] = billsRaw ? JSON.parse(billsRaw) : [];
-    let sightings: Sighting[] = sightingsRaw ? JSON.parse(sightingsRaw) : [];
+    const storedBills: Bill[] = billsRaw ? JSON.parse(billsRaw) : [];
+    const storedSightings: Sighting[] = sightingsRaw ? JSON.parse(sightingsRaw) : [];
+    const legacySampleBillIds = new Set(['AA123456B', 'BC987654A', 'MN555666D']);
+    const bills = storedBills.filter((bill) => !legacySampleBillIds.has(bill.id));
+    const sightings = storedSightings.filter((sighting) => !legacySampleBillIds.has(sighting.billId));
 
-    if (bills.length === 0) {
-      bills = INITIAL_SAMPLE_BILLS;
-      sightings = INITIAL_SAMPLE_SIGHTINGS;
-      localStorage.setItem(LOCAL_STORAGE_BILLS_KEY, JSON.stringify(bills));
-      localStorage.setItem(LOCAL_STORAGE_SIGHTINGS_KEY, JSON.stringify(sightings));
+    if (bills.length !== storedBills.length || sightings.length !== storedSightings.length) {
+      saveLocalData(bills, sightings);
     }
 
     return { bills, sightings };
   } catch {
-    return { bills: INITIAL_SAMPLE_BILLS, sightings: INITIAL_SAMPLE_SIGHTINGS };
+    return { bills: [], sightings: [] };
   }
 }
 
@@ -276,6 +142,19 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
     ...bill,
     sightings: billSightings,
   };
+}
+
+/** Initialize the trusted cooldown clock for bills created before it existed. */
+export async function initializeLegacyBillCooldown(serial: string): Promise<boolean> {
+  if (!db || !isFirebaseConfigured) return false;
+  const billRef = doc(db, 'bills', normalizeSerialNumber(serial));
+  return runTransaction(db, async (txn) => {
+    const snap = await txn.get(billRef);
+    if (!snap.exists()) return false;
+    if (snap.data().lastSightedAtServer) return false;
+    txn.update(billRef, { lastSightedAtServer: serverTimestamp() });
+    return true;
+  });
 }
 
 /**
@@ -377,6 +256,7 @@ export async function registerBillSighting(
           sightingsCount: newStep,
           totalDistanceKm: newTotalDist,
           lastSightedAt: nowIso,
+          lastSightedAtServer: Timestamp.fromDate(new Date(nowIso)),
         };
 
         // denomination は不変フィールドのため更新対象から外す
@@ -385,6 +265,7 @@ export async function registerBillSighting(
           sightingsCount: newStep,
           totalDistanceKm: newTotalDist,
           lastSightedAt: nowIso,
+          lastSightedAtServer: serverTimestamp(),
         }));
 
         return {
@@ -410,7 +291,10 @@ export async function registerBillSighting(
           lastSightedAt: nowIso,
         };
 
-        txn.set(billRef, sanitizeFirestoreData(finalBill));
+        txn.set(billRef, sanitizeFirestoreData({
+          ...finalBill,
+          lastSightedAtServer: serverTimestamp(),
+        }));
 
         const sightingDocRef = doc(sightingsColRef);
         // undefined を含めないよう、userNoteが存在する場合のみプロパティを含める
@@ -519,6 +403,7 @@ export async function registerBillSighting(
       sightingsCount: newStep,
       totalDistanceKm: newTotalDist,
       lastSightedAt: nowIso,
+      lastSightedAtServer: nowIso,
     };
 
     bills[existingBillIndex] = updatedBill;
@@ -546,6 +431,7 @@ export async function registerBillSighting(
       totalDistanceKm: 0,
       firstSightedAt: nowIso,
       lastSightedAt: nowIso,
+      lastSightedAtServer: nowIso,
     };
 
     const newSighting: Sighting = {

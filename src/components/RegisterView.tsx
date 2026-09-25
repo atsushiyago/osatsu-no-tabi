@@ -26,8 +26,27 @@ import {
   validateSerialNumber,
   formatSerialDisplay,
 } from '../utils/serial';
-import { registerBillSighting, getBillBySerial } from '../services/billService';
-import { checkSubmissionAllowed, recordSubmission } from '../utils/rateLimit';
+import { registerBillSighting, getBillBySerial, initializeLegacyBillCooldown } from '../services/billService';
+
+const BILL_COOLDOWN_MS = 15 * 60 * 1000;
+
+function getTimestampMillis(value: BillWithSightings['lastSightedAtServer']): number | null {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return value?.toMillis() ?? null;
+}
+
+function getCooldownRemainingMs(bill: BillWithSightings): number {
+  const lastSeenMs = getTimestampMillis(bill.lastSightedAtServer) ?? Date.parse(bill.lastSightedAt);
+  return Math.max(0, BILL_COOLDOWN_MS - (Date.now() - lastSeenMs));
+}
+
+function cooldownMessage(remainingMs: number): string {
+  const minutes = Math.ceil(remainingMs / 60_000);
+  return `このお札はついさっき登録されています。あと約${minutes}分で再登録できます。`;
+}
 
 interface RegisterViewProps {
   initialSerial?: string;
@@ -290,10 +309,8 @@ export const RegisterView = ({
       return;
     }
 
-    // 連投防止チェック
-    const rateCheck = checkSubmissionAllowed(normSerial);
-    if (!rateCheck.allowed) {
-      setErrorMessage(rateCheck.reason || '短時間の重複登録は制限されています');
+    if (isCheckingExisting) {
+      setErrorMessage('登録状況を確認しています。少し待ってからもう一度お試しください。');
       return;
     }
 
@@ -304,8 +321,30 @@ export const RegisterView = ({
 
     setIsSubmitting(true);
 
+    let billForSubmit = existingBill?.serialNumber === normSerial ? existingBill : null;
     try {
-      const targetDenomination = existingBill ? existingBill.denomination : denomination;
+      if (billForSubmit && !getTimestampMillis(billForSubmit.lastSightedAtServer)) {
+        const initialized = await initializeLegacyBillCooldown(normSerial);
+        const refreshedBill = await getBillBySerial(normSerial);
+        if (refreshedBill) {
+          billForSubmit = refreshedBill;
+          setExistingBill(refreshedBill);
+        }
+        if (initialized && billForSubmit) {
+          setErrorMessage(cooldownMessage(getCooldownRemainingMs(billForSubmit)));
+          return;
+        }
+      }
+
+      if (billForSubmit) {
+        const remainingMs = getCooldownRemainingMs(billForSubmit);
+        if (remainingMs > 0) {
+          setErrorMessage(cooldownMessage(remainingMs));
+          return;
+        }
+      }
+
+      const targetDenomination = billForSubmit ? billForSubmit.denomination : denomination;
       const result = await registerBillSighting({
         denomination: targetDenomination,
         serialNumber: normSerial,
@@ -315,9 +354,6 @@ export const RegisterView = ({
         longitudeApprox: currentCityObj.lng,
         userNote,
       });
-
-      // ローカルレートリミットに記録
-      recordSubmission(normSerial);
 
       onSuccess(result);
     } catch (err: any) {
@@ -331,7 +367,14 @@ export const RegisterView = ({
         err?.code === 'permission-denied';
 
       if (isInternalFirebaseError) {
-        setErrorMessage('登録できませんでした。通信環境をご確認のうえ、しばらくしてからもう一度お試しください。');
+        if (billForSubmit && err?.code === 'permission-denied') {
+          const remainingMs = getCooldownRemainingMs(billForSubmit);
+          setErrorMessage(remainingMs > 0
+            ? cooldownMessage(remainingMs)
+            : 'このお札の再登録を受け付けられませんでした。少し時間をあけてから、もう一度お試しください。');
+        } else {
+          setErrorMessage('登録できませんでした。通信環境をご確認のうえ、しばらくしてからもう一度お試しください。');
+        }
       } else {
         setErrorMessage(rawMsg || '登録中にエラーが発生しました。再度お試しください。');
       }
@@ -676,10 +719,11 @@ export const RegisterView = ({
 
         {/* 現在地選択 */}
         <div className="form-group">
-          <div className="form-label">
-            <span>3. 現在の地域</span>
+          <div className="form-label location-form-label">
+            <span>3. 現在の地域（市区町村まで）</span>
             <span className="form-label-badge">プライバシー保護済</span>
           </div>
+          <p className="location-privacy-note">正確な住所は保存しません</p>
 
           <button
             type="button"
@@ -811,7 +855,7 @@ export const RegisterView = ({
           <button
             type="submit"
             className="btn-primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || (Boolean(validation?.isValid) && isCheckingExisting)}
             id="btn-submit-registration"
           >
             <Sparkles size={18} />

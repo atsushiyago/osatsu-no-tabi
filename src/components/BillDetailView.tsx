@@ -166,31 +166,18 @@ export const BillDetailView = ({
 
       {/* 紙幣ヘッダーカード */}
       <div
+        className="bill-detail-hero"
         style={{
-          background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+          background: '#334f40',
           color: '#ffffff',
-          borderRadius: '20px',
+          borderRadius: '6px',
           padding: '20px',
           marginBottom: '20px',
-          boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.25)',
+          boxShadow: 'none',
           position: 'relative',
           overflow: 'hidden',
         }}
       >
-        {/* 背景装飾 */}
-        <div
-          style={{
-            position: 'absolute',
-            right: '-20px',
-            top: '-20px',
-            width: '120px',
-            height: '120px',
-            borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(59,130,246,0.2) 0%, rgba(0,0,0,0) 70%)',
-            pointerEvents: 'none',
-          }}
-        />
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
           <span
             style={{

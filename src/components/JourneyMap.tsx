@@ -60,7 +60,7 @@ export const JourneyMap = ({
     // 軌跡のポリラインを描画
     if (latLngs.length > 1) {
       L.polyline(latLngs, {
-        color: '#2563eb',
+        color: '#9f3b2f',
         weight: 4,
         opacity: 0.85,
         dashArray: '8, 8',
@@ -74,7 +74,7 @@ export const JourneyMap = ({
       const isFirst = idx === 0;
       const isLatest = idx === sightings.length - 1 && sightings.length > 1;
 
-      const bgColor = isLatest ? '#ef4444' : isFirst ? '#10b981' : '#2563eb';
+      const bgColor = isLatest ? '#9f3b2f' : isFirst ? '#365d4a' : '#a6813d';
       const label = isFirst ? '起点' : isLatest ? '最新' : `${s.step}`;
 
       // カスタムHTMLアイコン（丸いバッジ）
@@ -164,10 +164,10 @@ export const JourneyMap = ({
         position: 'relative',
         width: '100%',
         height,
-        borderRadius: '16px',
         overflow: 'hidden',
-        boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04)',
-        border: '1px solid #e2e8f0',
+        boxShadow: 'none',
+        border: '1px solid #d8d1c4',
+        borderRadius: '5px',
       }}
     >
       <div ref={mapContainerRef} style={{ width: '100%', height: '100%', zIndex: 1 }} />
@@ -178,14 +178,14 @@ export const JourneyMap = ({
             bottom: '12px',
             right: '12px',
             zIndex: 10,
-            background: 'rgba(255, 255, 255, 0.92)',
-            backdropFilter: 'blur(6px)',
+            background: '#fbf9f3',
+            backdropFilter: 'none',
             padding: '4px 10px',
-            borderRadius: '9999px',
-            fontSize: '11px',
-            color: '#475569',
+            borderRadius: '3px',
+            fontSize: '15px',
+            color: '#282a27',
             fontWeight: 500,
-            boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+            boxShadow: 'none',
             pointerEvents: 'none',
           }}
         >

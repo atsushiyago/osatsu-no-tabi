@@ -12,6 +12,7 @@ import {
 import type { GlobalStats, BillWithSightings } from '../types';
 import { getGlobalStats, getRecentJourneys } from '../services/billService';
 import { formatSerialDisplay } from '../utils/serial';
+import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
 
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
@@ -27,13 +28,19 @@ export const HomeView = ({
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
   const [loading, setLoading] = useState(true);
+  const displayedJourneys = loading
+    ? []
+    : [
+        ...recentJourneys,
+        ...SAMPLE_JOURNEYS.slice(0, Math.max(0, 8 - recentJourneys.length)),
+      ];
 
   useEffect(() => {
     async function loadData() {
       try {
         const [statsData, journeysData] = await Promise.all([
           getGlobalStats(),
-          getRecentJourneys(4),
+          getRecentJourneys(8),
         ]);
         setStats(statsData);
         setRecentJourneys(journeysData);
@@ -94,10 +101,10 @@ export const HomeView = ({
       <section className="stats-container">
         <div className="stats-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <TrendingUp size={16} color="#2563eb" />
+            <TrendingUp size={16} color="#9f3b2f" />
             <span>全国の旅の統計</span>
           </div>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>リアルタイム</span>
+          <span style={{ fontSize: '15px', color: '#494b46' }}>リアルタイム</span>
         </div>
 
         <div className="stats-grid">
@@ -119,7 +126,7 @@ export const HomeView = ({
 
           <div className="stat-card">
             <span className="stat-label">再発見された紙幣</span>
-            <div className="stat-value" style={{ color: '#2563eb' }}>
+            <div className="stat-value" style={{ color: '#9f3b2f' }}>
               {loading ? '...' : (stats?.rediscoveredBills ?? 0).toLocaleString()}
               <span className="stat-unit">枚</span>
             </div>
@@ -127,7 +134,7 @@ export const HomeView = ({
 
           <div className="stat-card">
             <span className="stat-label">最長移動距離</span>
-            <div className="stat-value" style={{ color: '#0d9488' }}>
+            <div className="stat-value" style={{ color: '#365d4a' }}>
               {loading ? '...' : (stats?.maxDistanceKm ?? 0).toLocaleString()}
               <span className="stat-unit">km</span>
             </div>
@@ -136,7 +143,7 @@ export const HomeView = ({
       </section>
 
       {/* 最近の旅ログ */}
-      {recentJourneys.length > 0 && (
+      {displayedJourneys.length > 0 && (
         <section style={{ margin: '24px 0' }}>
           <div
             style={{
@@ -157,7 +164,7 @@ export const HomeView = ({
               }}
             >
               <Award size={18} color="#f59e0b" />
-              <span>旅を続けるお札たち</span>
+              <span>最近の旅</span>
             </h2>
             <span style={{ fontSize: '12px', color: '#64748b' }}>
               タップで軌跡を表示
@@ -165,7 +172,8 @@ export const HomeView = ({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {recentJourneys.map((b) => {
+            {displayedJourneys.map((b) => {
+              const isSample = b.id.startsWith('sample-');
               const startCity = b.sightings[0]
                 ? `${b.sightings[0].municipality}`
                 : '不明';
@@ -175,25 +183,28 @@ export const HomeView = ({
               return (
                 <div
                   key={b.id}
-                  onClick={() => onSelectBill(b.serialNumber)}
+                  className="journey-row"
+                  onClick={isSample ? undefined : () => onSelectBill(b.serialNumber)}
+                  onKeyDown={isSample ? undefined : (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectBill(b.serialNumber);
+                    }
+                  }}
+                  role={isSample ? undefined : 'button'}
+                  tabIndex={isSample ? undefined : 0}
                   style={{
                     backgroundColor: '#ffffff',
                     border: '1px solid #e2e8f0',
                     borderRadius: '14px',
                     padding: '14px 16px',
-                    cursor: 'pointer',
+                    cursor: isSample ? 'default' : 'pointer',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     transition: 'all 0.15s ease',
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.borderColor = '#93c5fd')
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.borderColor = '#e2e8f0')
-                  }
                 >
                   <div>
                     <div
@@ -204,37 +215,28 @@ export const HomeView = ({
                         marginBottom: '4px',
                       }}
                     >
-                      <span
+                      {isSample && <span className="sample-badge">サンプル</span>}
+                      {!isSample && <span
                         style={{
-                          backgroundColor:
-                            b.denomination === 10000
-                              ? '#fef3c7'
-                              : b.denomination === 5000
-                              ? '#f3e8ff'
-                              : '#ecfdf5',
-                          color:
-                            b.denomination === 10000
-                              ? '#92400e'
-                              : b.denomination === 5000
-                              ? '#6b21a8'
-                              : '#065f46',
-                          fontSize: '11px',
+                          backgroundColor: '#eee5d5',
+                          color: '#463924',
+                          fontSize: '15px',
                           fontWeight: 700,
                           padding: '2px 6px',
                           borderRadius: '6px',
                         }}
                       >
                         {b.denomination.toLocaleString()}円札
-                      </span>
+                      </span>}
                       <span
                         style={{
                           fontFamily: 'monospace',
                           fontWeight: 700,
-                          fontSize: '13px',
+                          fontSize: isSample ? '15px' : '13px',
                           color: '#334155',
                         }}
                       >
-                        {formatSerialDisplay(b.serialNumber)}
+                        {isSample ? '架空ID ' + b.id : formatSerialDisplay(b.serialNumber)}
                       </span>
                     </div>
 
@@ -247,23 +249,23 @@ export const HomeView = ({
                         color: '#475569',
                       }}
                     >
-                      <MapPin size={12} color="#64748b" />
+                        <MapPin size={15} color="#494b46" />
                       <span>{startCity}</span>
                       {b.sightings.length > 1 && (
                         <>
-                          <span style={{ color: '#cbd5e1' }}>→</span>
-                          <span style={{ fontWeight: 700, color: '#2563eb' }}>
+                      <span style={{ color: '#9f3b2f' }}>→</span>
+                      <span style={{ fontWeight: 700, color: '#7f2f27' }}>
                             {latestCity}
                           </span>
                         </>
                       )}
-                      <span style={{ color: '#94a3b8', fontSize: '11px' }}>
+                      <span style={{ color: '#494b46', fontSize: '15px' }}>
                         ({b.sightingsCount}回目・約{b.totalDistanceKm}km)
                       </span>
                     </div>
                   </div>
 
-                  <ArrowRight size={18} color="#94a3b8" />
+                  {!isSample && <ArrowRight size={18} color="#94a3b8" />}
                 </div>
               );
             })}

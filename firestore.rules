@@ -45,26 +45,29 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() >= 19 && data.updatedAt.size() <= 32
         && data.firstSightedAt is string && data.firstSightedAt.size() >= 19 && data.firstSightedAt.size() <= 32
         && data.lastSightedAt is string && data.lastSightedAt.size() >= 19 && data.lastSightedAt.size() <= 32
+        // This field is assigned by serverTimestamp(); clients cannot choose its value.
+        && data.lastSightedAtServer is timestamp && data.lastSightedAtServer == request.time
         
         // 未知フィールドの混入防止（必要な全9フィールドのみ許可）
-        && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
-        && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt']);
+        && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
+        && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
     }
 
     function isValidBillUpdate() {
       let current = resource.data;
       let next = request.resource.data;
 
-      return (
+      let immutableFields =
         // 改ざんを禁止する不変フィールド
         next.id == current.id
         && next.serialNumber == current.serialNumber
         && next.denomination == current.denomination
         && next.createdAt == current.createdAt
-        && next.firstSightedAt == current.firstSightedAt
-        
+        && next.firstSightedAt == current.firstSightedAt;
+
+      let validRediscovery =
         // 発見回数は現在値 + 1 のみ許可（ジャンプや減少を防止）
-        && next.sightingsCount == current.sightingsCount + 1
+        next.sightingsCount == current.sightingsCount + 1
         
         // 移動距離は減少不可かつ非負数
         && next.totalDistanceKm is number
@@ -73,11 +76,22 @@ service cloud.firestore {
         // 更新日時フィールドの検証
         && next.updatedAt is string && next.updatedAt.size() >= 19 && next.updatedAt.size() <= 32
         && next.lastSightedAt is string && next.lastSightedAt.size() >= 19 && next.lastSightedAt.size() <= 32
+        && current.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer == request.time
+        && request.time >= current.lastSightedAtServer + duration.value(15, 'm')
         
         // 未知フィールドの追加防止
-        && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
-        && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
-      );
+        && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
+        && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
+
+      let initializeLegacyCooldown =
+        !('lastSightedAtServer' in current)
+        && next.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer == request.time
+        && next.diff(current).affectedKeys().hasOnly(['lastSightedAtServer']);
+
+      return immutableFields && (validRediscovery || initializeLegacyCooldown);
     }
 
     // ---------------------------------------------------------------
@@ -98,6 +112,7 @@ service cloud.firestore {
     function isValidNewSighting() {
       let data = request.resource.data;
       let targetBillDoc = getAfter(/databases/$(database)/documents/bills/$(data.billId));
+      let billPath = /databases/$(database)/documents/bills/$(data.billId);
 
       return (
         // トランザクションコミット後に対応する bills/{billId} が存在すること
@@ -105,6 +120,9 @@ service cloud.firestore {
         
         // トランザクション整合性: sightingのstepとbillのsightingsCountが完全に連動していること
         && data.step == targetBillDoc.data.sightingsCount
+        && targetBillDoc.data.lastSightedAtServer == request.time
+        && ((!exists(billPath) && data.step == 1)
+          || (exists(billPath) && data.step == get(billPath).data.sightingsCount + 1))
         
         // 基本フィールド型とフォーマット
         && data.id is string

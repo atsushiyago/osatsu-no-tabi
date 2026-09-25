@@ -1,3 +1,5 @@
+import type { Timestamp } from 'firebase/firestore';
+
 export type Denomination = 1000 | 5000 | 10000;
 
 export interface Bill {
@@ -10,6 +12,8 @@ export interface Bill {
   totalDistanceKm: number;
   firstSightedAt: string;
   lastSightedAt: string;
+  /** Server-only enforcement clock used by Firestore Rules; absent on legacy bills until lazily migrated. */
+  lastSightedAtServer?: Timestamp | string;
 }
 
 export interface Sighting {
