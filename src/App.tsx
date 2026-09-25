@@ -120,16 +120,9 @@ export function App() {
       {/* ヘッダー */}
       <header className="header">
         <div className="brand" onClick={() => navigateTo('home')}>
-          <div className="brand-icon">
-            <Compass size={22} />
-          </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <span className="brand-title">お札の旅</span>
-              <span className="brand-badge">MVP</span>
-            </div>
-            <div style={{ fontSize: '10px', color: '#94a3b8', lineHeight: 1 }}>
-              Where's George? Japan
             </div>
           </div>
         </div>

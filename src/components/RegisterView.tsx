@@ -721,7 +721,6 @@ export const RegisterView = ({
         <div className="form-group">
           <div className="form-label location-form-label">
             <span>3. 現在の地域（市区町村まで）</span>
-            <span className="form-label-badge">プライバシー保護済</span>
           </div>
           <p className="location-privacy-note">正確な住所は保存しません</p>
 
@@ -729,25 +728,10 @@ export const RegisterView = ({
             type="button"
             onClick={handleAutoLocate}
             disabled={locating}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              width: '100%',
-              padding: '10px',
-              marginBottom: '10px',
-              backgroundColor: '#f0fdf4',
-              color: '#166534',
-              border: '1px solid #bbf7d0',
-              borderRadius: '10px',
-              fontSize: '13px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
+            className="btn-location"
             id="btn-auto-locate"
           >
-            <Navigation size={15} />
+            <Navigation size={20} />
             <span>{locating ? '位置判定中...' : '現在地から市区町村を自動設定'}</span>
           </button>
 
@@ -858,7 +842,6 @@ export const RegisterView = ({
             disabled={isSubmitting || (Boolean(validation?.isValid) && isCheckingExisting)}
             id="btn-submit-registration"
           >
-            <Sparkles size={18} />
             <span>{isSubmitting ? '登録しています...' : 'お札の旅を登録する'}</span>
           </button>
 

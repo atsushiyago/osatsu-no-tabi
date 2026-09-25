@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Compass, Sparkles, ArrowRight } from 'lucide-react';
+import { Search, Compass, ArrowRight } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
 import { normalizeSerialNumber, formatSerialDisplay } from '../utils/serial';
 
@@ -98,9 +98,9 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
       {notFound && searchedSerial && (
         <div
           style={{
-            backgroundColor: '#fffbeb',
-            border: '1.5px solid #fde68a',
-            borderRadius: '16px',
+            backgroundColor: '#fbf9f3',
+            border: '1.5px solid #d8d1c4',
+            borderRadius: '6px',
             padding: '20px',
             textAlign: 'center',
             marginBottom: '24px',
@@ -115,19 +115,19 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               width: '48px',
               height: '48px',
               borderRadius: '50%',
-              backgroundColor: '#fef3c7',
-              color: '#d97706',
+              backgroundColor: '#f8ebe7',
+              color: '#9f3b2f',
               marginBottom: '12px',
             }}
           >
             <Compass size={24} />
           </div>
 
-          <h3 style={{ fontSize: '17px', fontWeight: 800, color: '#92400e', marginBottom: '8px' }}>
+          <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#282a27', marginBottom: '8px' }}>
             このお札はまだ登録されていません
           </h3>
 
-          <p style={{ fontSize: '14px', color: '#78350f', lineHeight: 1.6, marginBottom: '18px' }}>
+          <p style={{ fontSize: '16px', color: '#494b46', lineHeight: 1.6, marginBottom: '18px' }}>
             記番号「{formatSerialDisplay(searchedSerial)}」はまだ誰も見つけていない新しいお札です。
             <br />
             <strong>あなたが最初の発見者になりませんか？</strong>
@@ -136,13 +136,8 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           <button
             className="btn-primary"
             onClick={() => onRegisterNew(searchedSerial)}
-            style={{
-              background: 'linear-gradient(135deg, #d97706, #b45309)',
-              boxShadow: '0 4px 14px rgba(217, 119, 6, 0.35)',
-            }}
             id="btn-register-not-found"
           >
-            <Sparkles size={18} />
             <span>この記番号で最初の登録をする</span>
           </button>
         </div>

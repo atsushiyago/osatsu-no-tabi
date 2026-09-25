@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   Check,
   Navigation,
-  Sparkles,
 } from 'lucide-react';
 import type { BillWithSightings } from '../types';
 import { getBillBySerial } from '../services/billService';
@@ -181,22 +180,22 @@ export const BillDetailView = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
           <span
             style={{
-              fontSize: '12px',
+              fontSize: '15px',
               fontWeight: 800,
-              padding: '3px 8px',
-              borderRadius: '6px',
+              padding: '4px 9px',
+              borderRadius: '3px',
               backgroundColor:
                 denomination === 10000
-                  ? '#f59e0b'
+                  ? '#895b18'
                   : denomination === 5000
-                  ? '#a855f7'
-                  : '#10b981',
+                  ? '#9f3b2f'
+                  : '#365d4a',
               color: '#ffffff',
             }}
           >
             {denomination.toLocaleString()}円札
           </span>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+          <span style={{ fontSize: '16px', color: '#f4efe3' }}>
             {sightingsCount >= 2 ? '継続中の旅' : '最初の発見'}
           </span>
         </div>
@@ -204,7 +203,7 @@ export const BillDetailView = ({
         <div
           style={{
             fontFamily: 'monospace',
-            fontSize: '24px',
+            fontSize: '26px',
             fontWeight: 800,
             letterSpacing: '0.08em',
             color: '#f8fafc',
@@ -221,34 +220,34 @@ export const BillDetailView = ({
             gridTemplateColumns: 'repeat(2, 1fr)',
             gap: '10px',
             paddingTop: '14px',
-            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+            borderTop: '1px solid rgba(255, 255, 255, 0.35)',
           }}
         >
           <div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>発見回数</span>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#38bdf8' }}>
-              {sightingsCount} <span style={{ fontSize: '12px' }}>回</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>発見回数</span>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
+              {sightingsCount} <span style={{ fontSize: '12px', color: '#ffffff' }}>回</span>
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>最初の登録</span>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>最初の登録</span>
+            <div style={{ fontSize: '17px', fontWeight: 700, color: '#ffffff', marginTop: '2px' }}>
               {firstDateStr}
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>総移動距離</span>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#34d399' }}>
-              約 {totalDistanceKm} <span style={{ fontSize: '12px' }}>km</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>総移動距離</span>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
+              約 {totalDistanceKm} <span style={{ fontSize: '12px', color: '#ffffff' }}>km</span>
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>経過日数</span>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: '#fbbf24' }}>
-              {totalDays} <span style={{ fontSize: '12px' }}>日</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>経過日数</span>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
+              {totalDays} <span style={{ fontSize: '12px', color: '#ffffff' }}>日</span>
             </div>
           </div>
         </div>
@@ -266,7 +265,7 @@ export const BillDetailView = ({
         >
           <h3
             style={{
-              fontSize: '15px',
+              fontSize: '18px',
               fontWeight: 800,
               color: '#0f172a',
               display: 'flex',
@@ -274,11 +273,11 @@ export const BillDetailView = ({
               gap: '6px',
             }}
           >
-            <Navigation size={16} color="#2563eb" />
+            <Navigation size={18} color="#9f3b2f" />
             <span>日本列島の移動軌跡</span>
           </h3>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>
-            ピンタップで詳細
+          <span style={{ fontSize: '15px', color: '#494b46' }}>
+            地図の印を選ぶと詳細を確認できます
           </span>
         </div>
 
@@ -297,7 +296,7 @@ export const BillDetailView = ({
         >
           <h3
             style={{
-              fontSize: '15px',
+              fontSize: '18px',
               fontWeight: 800,
               color: '#0f172a',
               display: 'flex',
@@ -305,7 +304,7 @@ export const BillDetailView = ({
               gap: '6px',
             }}
           >
-            <Calendar size={16} color="#2563eb" />
+            <Calendar size={18} color="#365d4a" />
             <span>移動履歴 ({sightings.length}地点)</span>
           </h3>
         </div>
@@ -340,18 +339,18 @@ export const BillDetailView = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span
                         style={{
-                          fontSize: '11px',
+                          fontSize: '15px',
                           fontWeight: 700,
                           backgroundColor: isLatest
                             ? '#fee2e2'
                             : isFirst
                             ? '#d1fae5'
-                            : '#eff6ff',
+                            : '#eee5d5',
                           color: isLatest
                             ? '#b91c1c'
                             : isFirst
                             ? '#065f46'
-                            : '#1d4ed8',
+                            : '#624c26',
                           padding: '2px 6px',
                           borderRadius: '4px',
                         }}
@@ -359,12 +358,12 @@ export const BillDetailView = ({
                         第{s.step}の足跡 {isFirst ? '(起点)' : isLatest ? '(最新)' : ''}
                       </span>
                     </div>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>{dateStr}</span>
+                    <span style={{ fontSize: '15px', color: '#494b46' }}>{dateStr}</span>
                   </div>
 
                   <div
                     style={{
-                      fontSize: '16px',
+                      fontSize: '18px',
                       fontWeight: 800,
                       color: '#0f172a',
                       display: 'flex',
@@ -373,7 +372,7 @@ export const BillDetailView = ({
                       marginTop: '4px',
                     }}
                   >
-                    <MapPin size={16} color="#2563eb" />
+                    <MapPin size={18} color="#9f3b2f" />
                     <span>
                       {s.prefecture} {s.municipality}
                     </span>
@@ -383,8 +382,8 @@ export const BillDetailView = ({
                     <div
                       style={{
                         marginTop: '6px',
-                        fontSize: '12px',
-                        color: '#2563eb',
+                        fontSize: '16px',
+                        color: '#7f2f27',
                         fontWeight: 600,
                       }}
                     >
@@ -399,8 +398,8 @@ export const BillDetailView = ({
                         padding: '8px 10px',
                         backgroundColor: '#f8fafc',
                         borderRadius: '8px',
-                        fontSize: '12px',
-                        color: '#334155',
+                        fontSize: '16px',
+                        color: '#282a27',
                         borderLeft: '3px solid #cbd5e1',
                       }}
                     >
@@ -414,15 +413,14 @@ export const BillDetailView = ({
         </div>
       </section>
 
-      {/* 今このお札を持っている人へのアクション */}
-      <div style={{ marginTop: '28px' }}>
+      {/* 現在地の記録は履歴を読んだ後に選べる副次操作 */}
+      <div style={{ marginTop: '24px' }}>
         <button
-          className="btn-primary"
+          className="btn-secondary detail-secondary-action"
           onClick={() => onRegisterAgain(serialNumber)}
           id="btn-re-register-this"
         >
-          <Sparkles size={18} />
-          <span>今このお札をお持ちですか？発見を記録する</span>
+          <span>このお札の現在地を記録する</span>
         </button>
       </div>
     </div>

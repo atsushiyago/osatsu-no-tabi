@@ -83,7 +83,7 @@ export const HomeView = ({
             id="btn-register-top"
           >
             <PlusCircle size={20} />
-            <span>お札を登録する</span>
+            <span>手元にあるお札を登録する</span>
           </button>
 
           <button
