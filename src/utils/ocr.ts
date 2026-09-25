@@ -27,7 +27,9 @@ interface CandidateWithScore {
 
 /**
  * 文字列が指定された記番号構成（先頭英字 + 中央数字6桁 + 末尾英字）に
- * 補正可能かどうかを判定し、可能であれば補正後の文字列と補正文字数を返す
+ * 補正可能かどうかを判定し、可能であれば補正後の文字列と補正文字数を返す。
+ * 
+ * ※注意: OCR結果を無理やり変換しすぎないよう、補正文字数が2文字を超える場合は不適格とする。
  */
 function tryFixPattern(
   chunk: string,
@@ -84,6 +86,11 @@ function tryFixPattern(
     }
   }
 
+  // 無理な補正の防止: 補正が3文字以上の場合はOCR結果の原形を留めていないため候補から除外
+  if (corrections > 2) {
+    return null;
+  }
+
   const serial = result.join('');
   const validation = validateSerialNumber(serial);
   if (!validation.isValid) {
@@ -125,7 +132,7 @@ function evaluateToken(token: string): CandidateWithScore[] {
 /**
  * 全角を半角にし、大文字化するが、空白・改行・記号は保持する
  */
-function cleanOcrText(input: string): string {
+export function cleanOcrText(input: string): string {
   if (!input) return '';
   // 全角英数字を半角に変換
   let text = input.replace(/[！-～]/g, (s) => {
@@ -162,7 +169,6 @@ export function extractSerialCandidates(
   };
 
   // 1. 英数字以外の境界（または先頭・末尾）で区切られた完全一致を探索
-  // 例: "AA123456A and BB987654C" -> "AA123456A", "BB987654C"
   const isolatedExactRegex = /(?:^|[^A-Z0-9])([A-Z]{1,2}[0-9]{6}[A-Z]{1,2})(?:$|[^A-Z0-9])/g;
   let match: RegExpExecArray | null;
   while ((match = isolatedExactRegex.exec(cleanedText)) !== null) {
@@ -173,7 +179,6 @@ export function extractSerialCandidates(
   }
 
   // 2. 単語（空白・改行区切り）単位の検証 & 誤認識補正 (O/0, I/1, S/5, B/8, Z/2)
-  // 不要な記号を両端からトリムした上で評価
   const rawWords = cleanedText.split(/[\s\r\n\t]+/);
   for (const rawWord of rawWords) {
     const trimmedWord = rawWord.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
@@ -186,8 +191,6 @@ export function extractSerialCandidates(
   }
 
   // 3. 記番号の途中に空白やハイフンが誤混入したケースの検出
-  // 例: "AA 123456 B", "A-123 456-A", "AA 123456\nB"
-  // 空白・ハイフン区切りの連続する塊を結合して評価
   const segmentedRegex = /([A-Z0-9]{1,3}[\s-]+[A-Z0-9\s-]{4,10}[A-Z0-9]{1,3})/g;
   while ((match = segmentedRegex.exec(cleanedText)) !== null) {
     const collapsed = match[1].replace(/[\s-]/g, '');
@@ -223,75 +226,174 @@ export function extractSerialCandidates(
 }
 
 /**
- * ブラウザメモリ内（Canvas）で画像をOCR向けにリサイズ＆前処理する
- * - 最大長辺を1400pxにリサイズ（速度・精度の両立）
- * - グレースケール化
- * - コントラスト強調（記番号文字のエッジを際立たせる）
+ * Otsu法（判別分析法）による最適閾値の自動算出
  */
-export async function preprocessImage(imageFile: File): Promise<Blob> {
+function calculateOtsuThreshold(grayData: Uint8ClampedArray): number {
+  const histogram = new Array(256).fill(0);
+  const total = grayData.length / 4;
+
+  for (let i = 0; i < grayData.length; i += 4) {
+    histogram[grayData[i]]++;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < 256; i++) {
+    sum += i * histogram[i];
+  }
+
+  let sumB = 0;
+  let wB = 0;
+  let wF = 0;
+  let maxVariance = 0;
+  let threshold = 128;
+
+  for (let t = 0; t < 256; t++) {
+    wB += histogram[t];
+    if (wB === 0) continue;
+    wF = total - wB;
+    if (wF === 0) break;
+
+    sumB += t * histogram[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const betweenVariance = wB * wF * (mB - mF) * (mB - mF);
+
+    if (betweenVariance > maxVariance) {
+      maxVariance = betweenVariance;
+      threshold = t;
+    }
+  }
+
+  return threshold;
+}
+
+/**
+ * 前処理パターンの種類
+ */
+export interface PreprocessedPass {
+  name: string;
+  blob: Blob;
+}
+
+/**
+ * 画像をOCRに最適な文字サイズ（高さ80〜120px程度）になるよう必要に応じてアップスケールし、
+ * 以下の3種類の前処理パターンを生成する:
+ * 1. 原画像（アップスケールのみ・カラー情報保持）
+ * 2. グレースケール + コントラスト強調
+ * 3. グレースケール + 二値化 (Otsu適応閾値)
+ */
+export async function generatePreprocessedPasses(imageSource: Blob | File): Promise<PreprocessedPass[]> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    const objectUrl = URL.createObjectURL(imageFile);
+    const objectUrl = URL.createObjectURL(imageSource);
 
-    img.onload = () => {
+    img.onload = async () => {
       try {
-        // オブジェクトURLは直ちに解放
         URL.revokeObjectURL(objectUrl);
 
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) {
-          reject(new Error('Canvas 2D context not available'));
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+
+        // 記番号の文字高さをOCRに十分な解像度（高さ80〜120px程度）にスケールアップ
+        // クロップされた記番号部分の短辺が小さい場合、2〜3倍アップスケールする
+        let scale = 1.0;
+        if (srcH < 70) {
+          scale = Math.min(3.0, 100 / Math.max(1, srcH));
+        } else if (srcH < 100) {
+          scale = 1.5;
+        }
+
+        // 最大幅は1600pxに制限
+        if (srcW * scale > 1600) {
+          scale = 1600 / srcW;
+        }
+
+        const width = Math.max(1, Math.round(srcW * scale));
+        const height = Math.max(1, Math.round(srcH * scale));
+
+        // ベースとなるアップスケールCanvas
+        const baseCanvas = document.createElement('canvas');
+        baseCanvas.width = width;
+        baseCanvas.height = height;
+        const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
+        if (!baseCtx) {
+          reject(new Error('Canvas context not available'));
           return;
         }
 
-        const maxDimension = 1400;
-        let width = img.naturalWidth || img.width;
-        let height = img.naturalHeight || img.height;
+        // 高品質スムージングで拡大描画
+        baseCtx.imageSmoothingEnabled = true;
+        baseCtx.imageSmoothingQuality = 'high';
+        baseCtx.drawImage(img, 0, 0, width, height);
 
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
+        // --- パス 1: 原画像（アップスケールのみ） ---
+        const blobOriginal = await new Promise<Blob>((res, rej) => {
+          baseCanvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.95);
+        });
 
-        canvas.width = width;
-        canvas.height = height;
-        ctx.drawImage(img, 0, 0, width, height);
+        // --- パス 2: グレースケール + コントラスト強調 ---
+        const contrastCanvas = document.createElement('canvas');
+        contrastCanvas.width = width;
+        contrastCanvas.height = height;
+        const contrastCtx = contrastCanvas.getContext('2d', { willReadFrequently: true })!;
+        contrastCtx.drawImage(baseCanvas, 0, 0);
 
-        // ピクセル操作: グレースケール化 + コントラスト強調
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const data = imageData.data;
-        const contrastFactor = 1.35; // コントラストを35%強調
+        const imgData2 = contrastCtx.getImageData(0, 0, width, height);
+        const data2 = imgData2.data;
+        const contrastFactor = 1.4; // コントラスト40%強調
 
-        for (let i = 0; i < data.length; i += 4) {
-          // グレースケール計算 (Rec. 601)
-          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          // コントラスト調整: ((gray / 255 - 0.5) * factor + 0.5) * 255
+        for (let i = 0; i < data2.length; i += 4) {
+          const gray = 0.299 * data2[i] + 0.587 * data2[i + 1] + 0.114 * data2[i + 2];
           const adjusted = Math.min(255, Math.max(0, ((gray - 128) * contrastFactor) + 128));
-          data[i] = adjusted;
-          data[i + 1] = adjusted;
-          data[i + 2] = adjusted;
-          // Alpha は維持 (data[i + 3])
+          data2[i] = adjusted;
+          data2[i + 1] = adjusted;
+          data2[i + 2] = adjusted;
+        }
+        contrastCtx.putImageData(imgData2, 0, 0);
+
+        const blobContrast = await new Promise<Blob>((res, rej) => {
+          contrastCanvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.95);
+        });
+
+        // --- パス 3: グレースケール + 二値化 (Otsu法) ---
+        const binarizedCanvas = document.createElement('canvas');
+        binarizedCanvas.width = width;
+        binarizedCanvas.height = height;
+        const binarizedCtx = binarizedCanvas.getContext('2d', { willReadFrequently: true })!;
+        binarizedCtx.drawImage(baseCanvas, 0, 0);
+
+        const imgData3 = binarizedCtx.getImageData(0, 0, width, height);
+        const data3 = imgData3.data;
+
+        // まずグレースケール化
+        for (let i = 0; i < data3.length; i += 4) {
+          const gray = 0.299 * data3[i] + 0.587 * data3[i + 1] + 0.114 * data3[i + 2];
+          data3[i] = gray;
+          data3[i + 1] = gray;
+          data3[i + 2] = gray;
         }
 
-        ctx.putImageData(imageData, 0, 0);
+        // Otsu法で最適閾値を決定
+        const otsuThreshold = calculateOtsuThreshold(data3);
 
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Canvas toBlob conversion failed'));
-            }
-          },
-          'image/jpeg',
-          0.9
-        );
+        // 二値化（文字を濃い色、背景を白に）
+        for (let i = 0; i < data3.length; i += 4) {
+          const val = data3[i] < otsuThreshold ? 0 : 255;
+          data3[i] = val;
+          data3[i + 1] = val;
+          data3[i + 2] = val;
+        }
+        binarizedCtx.putImageData(imgData3, 0, 0);
+
+        const blobBinarized = await new Promise<Blob>((res, rej) => {
+          binarizedCanvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.95);
+        });
+
+        resolve([
+          { name: 'Original (Upscaled)', blob: blobOriginal },
+          { name: 'Contrast Enhanced', blob: blobContrast },
+          { name: 'Otsu Binarized', blob: blobBinarized },
+        ]);
       } catch (err) {
         reject(err);
       }
@@ -299,7 +401,7 @@ export async function preprocessImage(imageFile: File): Promise<Blob> {
 
     img.onerror = (e) => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error('Failed to load image file for OCR: ' + e));
+      reject(new Error('Failed to load image for preprocessing: ' + e));
     };
 
     img.src = objectUrl;
@@ -307,14 +409,14 @@ export async function preprocessImage(imageFile: File): Promise<Blob> {
 }
 
 /**
- * 端末内OCR実行関数
+ * 端末内OCR実行関数（マルチパス & SINGLE_LINE対応）
  * - dynamic import で tesseract.js を遅延ロード
- * - 外部サーバーへの画像アップロードは一切行わない
- * - 英数字ホワイトリスト指定
- * - debug=timing 時の計測ログ出力
+ * - ページセグメンテーション: SINGLE_LINE (7)
+ * - 複数前処理パターンを順次評価し、最も妥当な候補をマージ
+ * - ?debug=timing 時の詳細診断ログ出力
  */
 export async function recognizeBanknoteSerialFromImage(
-  imageFile: File,
+  imageFileOrBlob: Blob | File,
   onProgress?: (status: string) => void
 ): Promise<string[]> {
   const isDebugTiming =
@@ -334,42 +436,77 @@ export async function recognizeBanknoteSerialFromImage(
     loadTime = performance.now() - startTime;
   }
 
-  onProgress?.('画像を前処理中...');
-  let processedBlob: Blob | null = null;
+  onProgress?.('画像を前処理中（解像度最適化・二値化など）...');
+  let passes: PreprocessedPass[] = [];
   try {
-    processedBlob = await preprocessImage(imageFile);
+    passes = await generatePreprocessedPasses(imageFileOrBlob);
   } catch (err) {
-    console.warn('Preprocessing failed, fallback to original image:', err);
-    processedBlob = imageFile;
+    console.warn('Preprocessing passes failed, fallback to single pass:', err);
+    passes = [{ name: 'Raw Input', blob: imageFileOrBlob }];
   }
 
   onProgress?.('記番号を認識中...');
 
-  const processStartTime = isDebugTiming ? performance.now() : 0;
   let worker: any = null;
+  const allCandidateSerials = new Map<string, { serial: string; maxConfidence: number; sourcePass: string }>();
 
   try {
     worker = await createWorker('eng');
 
-    // 記番号の対象文字（英大文字＋数字）のみにホワイトリストを制限
+    // 1行の英数字列として認識 (PSM.SINGLE_LINE = 7)
     await worker.setParameters({
+      tessedit_pageseg_mode: '7',
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
     });
 
-    const ret = await worker.recognize(processedBlob);
-    const rawText = ret.data.text || '';
+    for (let i = 0; i < passes.length; i++) {
+      const pass = passes[i];
+      onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
+
+      const passStart = isDebugTiming ? performance.now() : 0;
+      const ret = await worker.recognize(pass.blob);
+      const rawText = ret.data.text || '';
+      const confidence = ret.data.confidence ?? 0;
+      const passDuration = isDebugTiming ? performance.now() - passStart : 0;
+
+      // 候補抽出
+      const passCandidates = extractSerialCandidates(rawText, 3);
+
+      if (isDebugTiming) {
+        console.log(
+          `%c[OCR Pass ${i + 1}: ${pass.name}] ` +
+          `Time: ${passDuration.toFixed(0)}ms | Confidence: ${confidence.toFixed(1)}% | ` +
+          `Raw: "${rawText.replace(/[\r\n]+/g, ' ').trim()}" | ` +
+          `Candidates: [${passCandidates.join(', ')}]`,
+          'background: #1e293b; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 2px 4px;'
+        );
+      }
+
+      for (const cand of passCandidates) {
+        const existing = allCandidateSerials.get(cand);
+        if (!existing || confidence > existing.maxConfidence) {
+          allCandidateSerials.set(cand, {
+            serial: cand,
+            maxConfidence: confidence,
+            sourcePass: pass.name,
+          });
+        }
+      }
+    }
 
     if (isDebugTiming) {
-      const processDuration = performance.now() - processStartTime;
       console.log(
-        `%c[Timing Monitor] OCR Load: ${loadTime.toFixed(0)}ms | Process: ${processDuration.toFixed(0)}ms`,
+        `%c[Timing Monitor] Total OCR Load: ${loadTime.toFixed(0)}ms | Total Time: ${(performance.now() - startTime).toFixed(0)}ms | Unique Candidates: ${allCandidateSerials.size}`,
         'background: #7c3aed; color: #fff; font-weight: bold; padding: 2px 6px; border-radius: 4px;'
       );
     }
 
-    // 候補の抽出と誤認識補正
-    const candidates = extractSerialCandidates(rawText, 3);
-    return candidates;
+    // 信頼度が高い順に並べ替え
+    const sorted = Array.from(allCandidateSerials.values()).sort(
+      (a, b) => b.maxConfidence - a.maxConfidence
+    );
+
+    return sorted.slice(0, 3).map((item) => item.serial);
   } finally {
     if (worker) {
       await worker.terminate();

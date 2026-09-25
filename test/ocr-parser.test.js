@@ -77,3 +77,13 @@ test('複数候補が存在する場合の抽出と上限', () => {
   assert.ok(res.includes('BB987654C'));
   assert.ok(res.includes('CC112233D'));
 });
+
+test('無理な補正（3文字以上の置換が必要な無関係な文字列）を生成しないこと', () => {
+  // 例: '01SSB82O' -> 8文字全て数字/置換対象だが、まともな記番号ではなく置換文字数が多すぎるため候補にしない
+  const resExcessive = extractSerialCandidates('01SSB82O');
+  assert.strictEqual(resExcessive.length, 0, '過剰な置換が必要な文字列は候補としないこと');
+
+  // 1〜2文字程度の軽微な混同のみ許容 (例: 'AA1234568' -> 8がBで1文字補正)
+  const resValid = extractSerialCandidates('AA1234568');
+  assert.deepStrictEqual(resValid, ['AA123456B']);
+});

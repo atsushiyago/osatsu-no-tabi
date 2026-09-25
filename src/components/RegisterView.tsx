@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
 import { recognizeBanknoteSerialFromImage } from '../utils/ocr.ts';
+import { CropModal } from './CropModal';
 import {
   PREFECTURES,
   getCitiesByPrefecture,
@@ -55,6 +56,7 @@ export const RegisterView = ({
 
   // OCR機能関連 state
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrStatusMessage, setOcrStatusMessage] = useState<string | null>(null);
   const [ocrCandidates, setOcrCandidates] = useState<string[]>([]);
@@ -68,20 +70,26 @@ export const RegisterView = ({
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     // 同一ファイルを再度選択した場合にも onChange が発火するようクリア
     e.target.value = '';
 
     if (!file) return;
 
+    // 撮影/選択後、まずクロップモーダルを開いてユーザーに記番号領域を指定してもらう
+    setPendingImageFile(file);
+  };
+
+  const handleCropComplete = async (croppedBlob: Blob) => {
+    setPendingImageFile(null);
     setIsOcrProcessing(true);
     setOcrStatusMessage('記番号を読み取っています…');
     setOcrMessage(null);
     setOcrCandidates([]);
 
     try {
-      const candidates = await recognizeBanknoteSerialFromImage(file, (msg) => {
+      const candidates = await recognizeBanknoteSerialFromImage(croppedBlob, (msg) => {
         setOcrStatusMessage(msg);
       });
 
@@ -103,7 +111,7 @@ export const RegisterView = ({
         setOcrCandidates([]);
         setOcrMessage({
           type: 'warn',
-          text: '記番号を読み取れませんでした。記番号部分を大きく明るい場所で撮影するか、手入力してください。',
+          text: '記番号を読み取れませんでした。記番号だけが入るよう枠を合わせて再撮影するか、手入力してください。',
         });
       }
     } catch (err) {
@@ -117,6 +125,10 @@ export const RegisterView = ({
       setIsOcrProcessing(false);
       setOcrStatusMessage(null);
     }
+  };
+
+  const handleCropCancel = () => {
+    setPendingImageFile(null);
   };
 
   // 都道府県が変更されたら市区町村リストを更新
@@ -476,7 +488,7 @@ export const RegisterView = ({
                 textAlign: 'center',
               }}
             >
-              📷 記番号が大きく写るように撮影してください（画像は端末内でのみ処理されます）
+              📷 撮影後、記番号だけが大きく入るように囲んでください（画像は端末内でのみ処理されます）
             </div>
 
             {/* OCR結果・候補表示 */}
@@ -738,6 +750,15 @@ export const RegisterView = ({
           </button>
         </div>
       </form>
+
+      {/* 記番号切り抜きモーダル */}
+      {pendingImageFile && (
+        <CropModal
+          imageFile={pendingImageFile}
+          onCrop={handleCropComplete}
+          onCancel={handleCropCancel}
+        />
+      )}
     </div>
   );
 };
