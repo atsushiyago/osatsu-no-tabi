@@ -99,7 +99,6 @@ async function runTests() {
   await assertPass('正常な再発見トランザクション (bill更新 sightingsCount:2 + sighting step:2)', async () => {
     await runTransaction(db, async (txn) => {
       txn.update(billRef, {
-        denomination: 1000,
         updatedAt: new Date().toISOString(),
         sightingsCount: 2,
         totalDistanceKm: 350,
@@ -117,6 +116,93 @@ async function runTests() {
         createdAt: new Date().toISOString(),
         distanceFromPrevKm: 350,
         daysFromPrev: 10,
+      });
+    });
+  });
+
+  // 3-B. 5000円札の登録と再発見の額面整合性テスト
+  const bill5000Id = 'AA555555A';
+  const bill5000Ref = doc(db, 'bills', bill5000Id);
+  const sight5000_1 = doc(collection(db, 'sightings'));
+
+  await assertPass('5000円札の新規登録 (AA555555A)', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.set(bill5000Ref, {
+        id: bill5000Id,
+        serialNumber: bill5000Id,
+        denomination: 5000,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        sightingsCount: 1,
+        totalDistanceKm: 0,
+        firstSightedAt: nowIso,
+        lastSightedAt: nowIso,
+      });
+
+      txn.set(sight5000_1, {
+        id: sight5000_1.id,
+        billId: bill5000Id,
+        step: 1,
+        prefecture: '大阪府',
+        municipality: '大阪市',
+        latitudeApprox: 34.6937,
+        longitudeApprox: 135.5023,
+        createdAt: nowIso,
+        distanceFromPrevKm: 0,
+        daysFromPrev: 0,
+      });
+    });
+  });
+
+  // 3-C. 拒否: 5000円札として登録済みの記番号を1000円として再発見しようとすると拒否
+  const badSight5000_2 = doc(collection(db, 'sightings'));
+  await assertReject('5000円札として登録済みの記番号を1000円で再発見しようとすると拒否', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(bill5000Ref, {
+        denomination: 1000, // 意図的に額面を変更
+        updatedAt: new Date().toISOString(),
+        sightingsCount: 2,
+        totalDistanceKm: 50,
+        lastSightedAt: new Date().toISOString(),
+      });
+
+      txn.set(badSight5000_2, {
+        id: badSight5000_2.id,
+        billId: bill5000Id,
+        step: 2,
+        prefecture: '京都府',
+        municipality: '京都市',
+        latitudeApprox: 35.0116,
+        longitudeApprox: 135.7681,
+        createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 50,
+        daysFromPrev: 2,
+      });
+    });
+  });
+
+  // 3-D. 成功: 正しい5000円（または denomination を更新せず維持）での再発見は成功
+  const goodSight5000_2 = doc(collection(db, 'sightings'));
+  await assertPass('正しい5000円での再発見トランザクションは成功', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(bill5000Ref, {
+        updatedAt: new Date().toISOString(),
+        sightingsCount: 2,
+        totalDistanceKm: 50,
+        lastSightedAt: new Date().toISOString(),
+      });
+
+      txn.set(goodSight5000_2, {
+        id: goodSight5000_2.id,
+        billId: bill5000Id,
+        step: 2,
+        prefecture: '京都府',
+        municipality: '京都市',
+        latitudeApprox: 35.0116,
+        longitudeApprox: 135.7681,
+        createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 50,
+        daysFromPrev: 2,
       });
     });
   });

@@ -279,6 +279,13 @@ export async function registerBillSighting(
         // 既に登録されている紙幣（再発見！）
         const currentBill = billSnap.data() as Bill;
 
+        // 額面不整合チェック: 既存の額面と異なる場合はエラー
+        if (input.denomination && input.denomination !== currentBill.denomination) {
+          throw new Error(
+            `このお札（記番号: ${normSerial}）は既に ${currentBill.denomination.toLocaleString()}円札 として登録されています。額面を変更することはできません。`
+          );
+        }
+
         // 直前の発見を取得
         const sq = query(
           sightingsColRef,
@@ -335,15 +342,15 @@ export async function registerBillSighting(
 
         const finalBill: Bill = {
           ...currentBill,
-          denomination: input.denomination, // 更新
+          denomination: currentBill.denomination, // 既存の額面を不変として維持
           updatedAt: nowIso,
           sightingsCount: newStep,
           totalDistanceKm: newTotalDist,
           lastSightedAt: nowIso,
         };
 
+        // denomination は不変フィールドのため更新対象から外す
         txn.update(billRef, sanitizeFirestoreData({
-          denomination: input.denomination,
           updatedAt: nowIso,
           sightingsCount: newStep,
           totalDistanceKm: newTotalDist,
@@ -415,6 +422,13 @@ export async function registerBillSighting(
   if (existingBillIndex >= 0) {
     // 既存紙幣の再発見
     const currentBill = bills[existingBillIndex];
+
+    if (input.denomination && input.denomination !== currentBill.denomination) {
+      throw new Error(
+        `このお札（記番号: ${normSerial}）は既に ${currentBill.denomination.toLocaleString()}円札 として登録されています。額面を変更することはできません。`
+      );
+    }
+
     const billSightings = sightings
       .filter((s) => s.billId === currentBill.id)
       .sort((a, b) => a.step - b.step);
@@ -458,7 +472,7 @@ export async function registerBillSighting(
 
     const updatedBill: Bill = {
       ...currentBill,
-      denomination: input.denomination,
+      denomination: currentBill.denomination,
       updatedAt: nowIso,
       sightingsCount: newStep,
       totalDistanceKm: newTotalDist,

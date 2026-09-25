@@ -6,8 +6,9 @@ import {
   AlertCircle,
   HelpCircle,
   Sparkles,
+  Lock,
 } from 'lucide-react';
-import type { Denomination, RegisterResult } from '../types';
+import type { Denomination, RegisterResult, BillWithSightings } from '../types';
 import {
   PREFECTURES,
   getCitiesByPrefecture,
@@ -19,7 +20,7 @@ import {
   validateSerialNumber,
   formatSerialDisplay,
 } from '../utils/serial';
-import { registerBillSighting } from '../services/billService';
+import { registerBillSighting, getBillBySerial } from '../services/billService';
 import { checkSubmissionAllowed, recordSubmission } from '../utils/rateLimit';
 
 interface RegisterViewProps {
@@ -46,6 +47,9 @@ export const RegisterView = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [existingBill, setExistingBill] = useState<BillWithSightings | null>(null);
+  const [isCheckingExisting, setIsCheckingExisting] = useState(false);
+
   // 都道府県が変更されたら市区町村リストを更新
   useEffect(() => {
     const cities = getCitiesByPrefecture(selectedPref);
@@ -54,6 +58,44 @@ export const RegisterView = ({
       setSelectedCity(cities[0].city);
     }
   }, [selectedPref]);
+
+  // 記番号の入力に応じて既存紙幣が存在するか確認
+  useEffect(() => {
+    const norm = normalizeSerialNumber(serialInput);
+    const val = validateSerialNumber(serialInput);
+
+    if (!val.isValid) {
+      setExistingBill(null);
+      return;
+    }
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      setIsCheckingExisting(true);
+      try {
+        const found = await getBillBySerial(norm);
+        if (isMounted) {
+          if (found) {
+            setExistingBill(found);
+            setDenomination(found.denomination); // 既存の額面を自動反映
+          } else {
+            setExistingBill(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to check existing bill:', err);
+      } finally {
+        if (isMounted) {
+          setIsCheckingExisting(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [serialInput]);
 
   // GPS取得と市区町村代表座標への丸め込み
   const handleAutoLocate = () => {
@@ -115,8 +157,9 @@ export const RegisterView = ({
     setIsSubmitting(true);
 
     try {
+      const targetDenomination = existingBill ? existingBill.denomination : denomination;
       const result = await registerBillSighting({
-        denomination,
+        denomination: targetDenomination,
         serialNumber: normSerial,
         prefecture: selectedPref,
         municipality: selectedCity,
@@ -152,17 +195,62 @@ export const RegisterView = ({
         {/* 額面選択 */}
         <div className="form-group">
           <label className="form-label">
-            <span>1. 額面を選択</span>
-            <span className="form-label-badge">必須</span>
+            <span>1. 額面</span>
+            <span className="form-label-badge">{existingBill ? '登録済み' : '必須'}</span>
           </label>
+
+          {existingBill ? (
+            <div
+              style={{
+                backgroundColor: '#eff6ff',
+                border: '1.5px solid #bfdbfe',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                marginBottom: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  backgroundColor: '#dbeafe',
+                  color: '#2563eb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Lock size={18} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '14px', fontWeight: 800, color: '#1e3a8a' }}>
+                  このお札は {existingBill.denomination.toLocaleString()}円札 として登録済みです
+                </div>
+                <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '2px' }}>
+                  再発見となるため額面は固定されています（これまでの発見: {existingBill.sightingsCount}回）
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="denom-selector">
             {([1000, 5000, 10000] as Denomination[]).map((val) => (
               <button
                 type="button"
                 key={val}
+                disabled={Boolean(existingBill)}
                 className={`denom-btn ${denomination === val ? 'active' : ''}`}
-                onClick={() => setDenomination(val)}
+                onClick={() => !existingBill && setDenomination(val)}
                 id={`denom-${val}`}
+                style={{
+                  opacity: existingBill && denomination !== val ? 0.45 : 1,
+                  cursor: existingBill ? 'not-allowed' : 'pointer',
+                }}
               >
                 <div className="denom-yen">{val.toLocaleString()}円</div>
                 <div className="denom-label">
@@ -199,25 +287,49 @@ export const RegisterView = ({
             <div
               style={{
                 display: 'flex',
+                flexWrap: 'wrap',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '8px',
                 marginTop: '6px',
                 fontSize: '12px',
                 color: validation?.isValid ? '#059669' : '#dc2626',
               }}
             >
-              {validation?.isValid ? (
-                <>
-                  <CheckCircle size={14} />
-                  <span>
-                    正規化記番号: <strong>{formatSerialDisplay(normSerial)}</strong>
-                  </span>
-                </>
-              ) : (
-                <>
-                  <AlertCircle size={14} />
-                  <span>{validation?.message}</span>
-                </>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {validation?.isValid ? (
+                  <>
+                    <CheckCircle size={14} />
+                    <span>
+                      正規化記番号: <strong>{formatSerialDisplay(normSerial)}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle size={14} />
+                    <span>{validation?.message}</span>
+                  </>
+                )}
+              </div>
+
+              {validation?.isValid && isCheckingExisting && (
+                <span style={{ color: '#64748b', fontSize: '11px' }}>
+                  （登録状況を確認中...）
+                </span>
+              )}
+
+              {validation?.isValid && !isCheckingExisting && existingBill && (
+                <span
+                  style={{
+                    backgroundColor: '#dbeafe',
+                    color: '#1e40af',
+                    fontWeight: 700,
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                  }}
+                >
+                  🎉 再発見のお札です！
+                </span>
               )}
             </div>
           )}
