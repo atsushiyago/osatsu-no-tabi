@@ -136,15 +136,60 @@ VITE_FIREBASE_APP_ID=1:1234567890:web:...
 
 ## 🚢 Vercelへのデプロイ方法
 
-1. GitHubなどのリモートリポジトリにプッシュします。
-2. [Vercel Dashboard](https://vercel.com/) にて「Add New Project」を選択し、リポジトリをインポート。
-3. **Build & Development Settings**:
+### 1. GitHubリポジトリへのプッシュ
+ローカルの変更をGitHubなどのリモートリポジトリへプッシュします。
+```bash
+git remote add origin <あなたのGitHubリポジトリURL>
+git branch -M main
+git push -u origin main
+```
+
+### 2. Vercelへのインポート
+1. [Vercel Dashboard](https://vercel.com/) にログインし、「**Add New...**」>「**Project**」を選択。
+2. 対象の GitHub リポジトリを選択して「**Import**」をクリック。
+3. **Build and Output Settings**（デフォルトで自動検出されます）:
    - Framework Preset: `Vite`
    - Build Command: `npm run build`
    - Output Directory: `dist`
-4. **Environment Variables**:
-   - Firebaseを利用する場合は、上記の `VITE_FIREBASE_*` 環境変数をVercelの環境変数設定画面に追加します。
-5. 「Deploy」をクリックすると数分で全世界に配信されます。
+   - Install Command: `npm install`
+
+### 3. Vercel環境変数の設定（最重要）
+本番環境でFirestoreと通信するために、必ず以下の環境変数を設定してください。
+未設定の場合、本番環境ではデータの誤保存事故を防ぐため、localStorageへのフォールバックを行わずエラー画面が表示される安全設計になっています。
+
+設定場所:
+**Vercel Dashboard** → 対象プロジェクト → **Settings** → **Environment Variables**
+
+| 変数名 | 説明 | 必須環境 |
+| :--- | :--- | :--- |
+| `VITE_FIREBASE_API_KEY` | Firebase Web APIキー | Production, Preview |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Authドメイン | Production, Preview |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase プロジェクトID | Production, Preview |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storageバケット | Production, Preview |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | 送信者ID | Production, Preview |
+| `VITE_FIREBASE_APP_ID` | Firebase アプリID | Production, Preview |
+
+※ 少なくとも **Production** には必ず設定してください。
+
+### 4. デプロイ実行
+「**Deploy**」ボタンをクリックします。1分前後でビルドが完了し、本番URL（`https://your-app.vercel.app`）が発行されます。
+
+---
+
+## 📱 公開後の実機確認チェックリスト（10項目）
+
+デプロイ完了後、スマートフォンおよびPCから以下の手順で本番動作を確認してください。
+
+- [ ] **1. スマホでトップページを開く**: モバイル表示が崩れておらず、キャッチコピーやボタンが正しく表示されること。
+- [ ] **2. 新しい記番号を1枚登録**: 例（`BB123456B`・千円札・東京都新宿区など）を手元のスマホから登録。
+- [ ] **3. Firestore Consoleで保存を確認**: Firebaseコンソールの `bills` コレクションおよび `sightings` コレクションにドキュメントが正しく生成されていること。
+- [ ] **4. 同じ記番号を別地域で再発見登録**: 再度登録画面を開き、同じ記番号を入力。額面が自動固定されることを確認し、別の地域（例: 愛知県名古屋市）で登録。
+- [ ] **5. HIT演出確認**: 紙吹雪アニメーションと「第2人目の発見者」モーダルがポップアップすること。
+- [ ] **6. 発見回数が2になる**: 紙幣詳細画面で「発見回数: 2回」と表示されること。
+- [ ] **7. 移動距離が増える**: 総移動距離が計算され（例: 約260km）、経過日数が反映されていること。
+- [ ] **8. 地図に2地点が出る**: Leaflet地図上に2つのピン（起点・最新）と、それらを結ぶ点線ポリラインが表示されること。
+- [ ] **9. ページを閉じて再度開いてもFirestoreから表示される**: ブラウザのキャッシュをクリアするか別タブで `/bill/BB123456B` を直接開いても、同じデータがFirestoreから取得できること。
+- [ ] **10. PCとスマホの両方から同じ紙幣を参照できる**: スマホで登録した記番号をPCブラウザの「検索」に入力し、同一の移動履歴が表示されること（マルチデバイス同期の確認）。
 
 ---
 

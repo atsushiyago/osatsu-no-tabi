@@ -174,7 +174,19 @@ export const RegisterView = ({
       onSuccess(result);
     } catch (err: any) {
       console.error('Registration failed:', err);
-      setErrorMessage(err?.message || '登録中にエラーが発生しました。再度お試しください。');
+      const rawMsg = err?.message || '';
+      const isInternalFirebaseError =
+        rawMsg.includes('Missing or insufficient') ||
+        rawMsg.includes('permission-denied') ||
+        rawMsg.includes('PERMISSION_DENIED') ||
+        rawMsg.includes('unavailable') ||
+        err?.code === 'permission-denied';
+
+      if (isInternalFirebaseError) {
+        setErrorMessage('登録できませんでした。通信環境をご確認のうえ、しばらくしてからもう一度お試しください。');
+      } else {
+        setErrorMessage(rawMsg || '登録中にエラーが発生しました。再度お試しください。');
+      }
     } finally {
       setIsSubmitting(false);
     }

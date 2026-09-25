@@ -25,11 +25,17 @@ if (isFirebaseConfigured) {
     db = getFirestore(app);
     console.info('Firebase Firestore successfully initialized.');
   } catch (err) {
-    console.warn('Failed to initialize Firebase, falling back to local store:', err);
+    console.error('Failed to initialize Firebase:', err);
     db = null;
   }
 } else {
-  console.info('Firebase environment variables not set. Using local demo repository mode.');
+  if (import.meta.env.PROD) {
+    console.error(
+      '【本番環境警告】Firebaseの環境変数が未設定です。VercelのProject Settings > Environment Variablesで VITE_FIREBASE_* を設定してください。'
+    );
+  } else {
+    console.info('Firebase environment variables not set. Running in local demo mode for development.');
+  }
 }
 
 export { app, db };

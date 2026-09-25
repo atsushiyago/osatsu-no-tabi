@@ -7,6 +7,7 @@ import { BillDetailView } from './components/BillDetailView';
 import { CelebrationModal } from './components/CelebrationModal';
 import type { RegisterResult } from './types';
 import { normalizeSerialNumber } from './utils/serial';
+import { isFirebaseConfigured } from './services/firebase';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill';
 
@@ -96,6 +97,23 @@ export function App() {
             navigateTo('bill', serial);
           }}
         />
+      )}
+
+      {/* 本番環境でのFirebase未設定警告バナー */}
+      {import.meta.env.PROD && !isFirebaseConfigured && (
+        <div
+          style={{
+            backgroundColor: '#ef4444',
+            color: '#ffffff',
+            padding: '10px 14px',
+            fontSize: '12px',
+            fontWeight: 700,
+            textAlign: 'center',
+            lineHeight: 1.4,
+          }}
+        >
+          ⚠️ Firebase環境変数が未設定です。VercelのEnvironment Variablesを設定してください。
+        </div>
       )}
 
       {/* ヘッダー */}

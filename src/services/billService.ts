@@ -241,7 +241,12 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
     };
   }
 
-  // Firebase未設定時のみのデモモード（ローカルリポジトリ）
+  // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
+  if (import.meta.env.PROD) {
+    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+  }
+
+  // 開発環境のみのデモモード（ローカルリポジトリ）
   const { bills, sightings } = getLocalData();
   const bill = bills.find((b) => b.serialNumber === normSerial);
   if (!bill) return null;
@@ -415,7 +420,12 @@ export async function registerBillSighting(
     return txResult;
   }
 
-  // ローカルリポジトリでの処理
+  // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
+  if (import.meta.env.PROD) {
+    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+  }
+
+  // 開発環境のみのデモモード（ローカルリポジトリ）
   const { bills, sightings } = getLocalData();
   const existingBillIndex = bills.findIndex((b) => b.serialNumber === normSerial);
 
@@ -580,7 +590,12 @@ export async function getGlobalStats(): Promise<GlobalStats> {
     };
   }
 
-  // Firebase未設定時のデモモード（ローカルリポジトリ）
+  // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
+  if (import.meta.env.PROD) {
+    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+  }
+
+  // 開発環境のみのデモモード（ローカルリポジトリ）
   const { bills } = getLocalData();
   const totalBills = bills.length;
   let totalSightings = 0;
@@ -650,7 +665,12 @@ export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightin
     return journeys;
   }
 
-  // Firebase未設定時のデモモード
+  // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
+  if (import.meta.env.PROD) {
+    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+  }
+
+  // 開発環境のみのデモモード
   const { bills, sightings } = getLocalData();
   const sortedBills = [...bills]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
