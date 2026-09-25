@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getUnseenSightingsCount,
+  getUnseenTrackedBills,
   resolveLastSeenBaseline,
   sortTrackedBillRows,
 } from '../src/utils/trackedBillState.js';
@@ -16,6 +17,15 @@ test('tracked bill reports one new sighting after a +1 increase', () => {
 
 test('tracked bill reports the full +3 increase', () => {
   assert.equal(getUnseenSightingsCount(7, 4), 3);
+});
+
+test('Home and My Bills share the same unseen bill selection', () => {
+  const rows = [
+    { id: 'seen', unseenSightingsCount: 0 },
+    { id: 'new-one', unseenSightingsCount: 1 },
+    { id: 'new-three', unseenSightingsCount: 3 },
+  ];
+  assert.deepEqual(getUnseenTrackedBills(rows).map((row) => row.id), ['new-one', 'new-three']);
 });
 
 test('missing legacy baseline is initialized quietly on first list load', () => {

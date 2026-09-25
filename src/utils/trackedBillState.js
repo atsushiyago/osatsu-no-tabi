@@ -16,6 +16,11 @@ export function resolveLastSeenBaseline(currentSightingsCount, storedSightingsCo
   };
 }
 
+/** @template {{ unseenSightingsCount: number }} T @param {T[]} rows @returns {T[]} */
+export function getUnseenTrackedBills(rows) {
+  return rows.filter((row) => row.unseenSightingsCount > 0);
+}
+
 /** @param {Array<{ bill: { updatedAt: string }, unseenSightingsCount: number }>} rows */
 export function sortTrackedBillRows(rows) {
   return [...rows].sort((a, b) => {

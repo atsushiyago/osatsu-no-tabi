@@ -1,30 +1,17 @@
-import { useEffect, useState } from 'react';
 import { ArrowRight, WalletCards } from 'lucide-react';
-import { getTrackedBills, type TrackedBillRow } from '../services/trackedBills';
+import type { TrackedBillRow } from '../services/trackedBills';
 import { formatSerialDisplay } from '../utils/serial';
+import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 
 interface TrackedBillsViewProps {
-  uid: string;
+  rows: TrackedBillRow[];
+  loading: boolean;
+  error: boolean;
   onSelectBill: (serial: string) => void;
 }
 
-export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
-  const [rows, setRows] = useState<TrackedBillRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const newBillCount = rows.filter((row) => row.unseenSightingsCount > 0).length;
-
-  useEffect(() => {
-    let active = true;
-    getTrackedBills(uid)
-      .then((result) => { if (active) setRows(result); })
-      .catch((reason) => {
-        console.warn('Failed to load this-device tracked bills:', reason);
-        if (active) setError(true);
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [uid]);
+export function TrackedBillsView({ rows, loading, error, onSelectBill }: TrackedBillsViewProps) {
+  const newBillCount = getUnseenTrackedBills(rows).length;
 
   return (
     <section className="tracked-bills-view">

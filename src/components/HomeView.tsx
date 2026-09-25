@@ -14,6 +14,7 @@ import { getGlobalStats, getRecentJourneys } from '../services/billService';
 import { formatSerialDisplay } from '../utils/serial';
 import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
 import type { TrackedBillRow } from '../services/trackedBills';
+import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
@@ -39,7 +40,7 @@ export const HomeView = ({
         ...recentJourneys,
         ...SAMPLE_JOURNEYS.slice(0, Math.max(0, 8 - recentJourneys.length)),
       ];
-  const newTrackedBills = trackedBills?.filter((row) => row.unseenSightingsCount > 0) ?? [];
+  const newTrackedBills = trackedBills ? getUnseenTrackedBills(trackedBills) : [];
   const leadingNewBill = newTrackedBills[0];
   const latestNewSighting = leadingNewBill?.bill.sightings.at(-1);
 

@@ -14,6 +14,20 @@ import { auth, ensureAnonymousUser, observeAuthState } from './services/firebase
 import { getTrackedBills, type TrackedBillRow } from './services/trackedBills';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked';
+type TrackedBillsLoadResult = {
+  uid: string;
+  refreshKey: number;
+  rows: TrackedBillRow[] | null;
+  error: boolean;
+};
+
+function scrollToPageTop() {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: window.scrollX, behavior: 'auto' });
+    });
+  });
+}
 
 export function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('home');
@@ -23,7 +37,8 @@ export function App() {
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(!auth);
   const [trackingNotice, setTrackingNotice] = useState(false);
-  const [homeTrackedBills, setHomeTrackedBills] = useState<TrackedBillRow[] | null>(null);
+  const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
+  const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
 
   useEffect(() => {
     const unsubscribe = observeAuthState((user) => {
@@ -43,20 +58,31 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!authUid || currentView !== 'home') return;
+    if (currentView !== 'home' && currentView !== 'tracked') return;
+    if (!authUid) return;
     let active = true;
     getTrackedBills(authUid)
-      .then((rows) => { if (active) setHomeTrackedBills(rows); })
+      .then((rows) => {
+        if (active) setTrackedBillsResult({ uid: authUid, refreshKey: trackedBillsRefreshKey, rows, error: false });
+      })
       .catch((error) => {
-        console.warn('Could not check this-device discoveries for Home:', error);
-        if (active) setHomeTrackedBills([]);
+        console.warn('Could not load this-device tracked bills:', error);
+        if (active) setTrackedBillsResult({ uid: authUid, refreshKey: trackedBillsRefreshKey, rows: null, error: true });
       });
     return () => { active = false; };
-  }, [authUid, currentView]);
+  }, [authUid, currentView, trackedBillsRefreshKey]);
+
+  const hasTrackedBillsView = currentView === 'home' || currentView === 'tracked';
+  const currentTrackedBillsResult = trackedBillsResult?.uid === authUid &&
+    trackedBillsResult.refreshKey === trackedBillsRefreshKey ? trackedBillsResult : null;
+  const trackedBills = currentTrackedBillsResult?.rows ?? null;
+  const trackedBillsLoading = hasTrackedBillsView && Boolean(authUid) && !currentTrackedBillsResult;
+  const trackedBillsError = currentTrackedBillsResult?.error ?? false;
 
   // URLハッシュまたはパスのパース (/bill/:serial)
   useEffect(() => {
     const handleUrlChange = () => {
+      scrollToPageTop();
       const hash = window.location.hash;
       const pathname = window.location.pathname;
 
@@ -87,6 +113,7 @@ export function App() {
   }, []);
 
   const navigateTo = (view: ViewMode, serial?: string) => {
+    scrollToPageTop();
     if (view === 'bill' && serial) {
       const norm = normalizeSerialNumber(serial);
       setSelectedSerial(norm);
@@ -104,10 +131,11 @@ export function App() {
       setCurrentView('search');
       window.location.hash = '#/search';
     } else if (view === 'tracked' && authUid) {
+      setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
     } else {
-      setHomeTrackedBills(null);
+      setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('home');
       window.location.hash = '#/';
     }
@@ -183,7 +211,7 @@ export function App() {
             onNavigateRegister={(serial) => navigateTo('register', serial)}
             onNavigateSearch={() => navigateTo('search')}
             onSelectBill={(serial) => navigateTo('bill', serial)}
-            trackedBills={authUid ? homeTrackedBills : null}
+            trackedBills={authUid ? trackedBills : null}
             onNavigateTrackedBills={() => navigateTo('tracked')}
           />
         )}
@@ -214,7 +242,12 @@ export function App() {
         )}
 
         {currentView === 'tracked' && authUid && (
-          <TrackedBillsView uid={authUid} onSelectBill={(serial) => navigateTo('bill', serial)} />
+          <TrackedBillsView
+            rows={trackedBills ?? []}
+            loading={trackedBillsLoading}
+            error={trackedBillsError}
+            onSelectBill={(serial) => navigateTo('bill', serial)}
+          />
         )}
         {currentView === 'tracked' && authReady && !authUid && (
           <div className="tracked-bills-unavailable">
