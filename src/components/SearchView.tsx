@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Search, Compass, ArrowRight } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
-import { normalizeSerialNumber, formatSerialDisplay } from '../utils/serial';
+import { normalizeSerialInput, normalizeSerialNumber, formatSerialDisplay } from '../utils/serial';
 
 interface SearchViewProps {
   onBillFound: (serial: string) => void;
@@ -68,14 +68,19 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               placeholder="例: AA123456B"
               value={searchInput}
               onChange={(e) => {
-                setSearchInput(e.target.value);
+                setSearchInput(normalizeSerialInput(e.target.value));
                 setNotFound(false);
               }}
               maxLength={12}
+              inputMode="text"
               autoCapitalize="characters"
               autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="done"
             />
           </div>
+          <p className="input-hint">全角・小文字でも自動変換します</p>
           {searchInput && (
             <p className="input-hint">
               検索キー: <strong>{formatSerialDisplay(normSerial)}</strong>

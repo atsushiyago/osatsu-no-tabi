@@ -22,6 +22,7 @@ import {
   type CityLocation,
 } from '../utils/geo';
 import {
+  normalizeSerialInput,
   normalizeSerialNumber,
   validateSerialNumber,
   formatSerialDisplay,
@@ -63,7 +64,7 @@ export const RegisterView = ({
   onCancel,
 }: RegisterViewProps) => {
   const [denomination, setDenomination] = useState<Denomination>(1000);
-  const [serialInput, setSerialInput] = useState(initialSerial);
+  const [serialInput, setSerialInput] = useState(normalizeSerialInput(initialSerial));
   const [selectedPref, setSelectedPref] = useState('東京都');
   const [selectedCity, setSelectedCity] = useState('千代田区');
   const [userNote, setUserNote] = useState('');
@@ -489,13 +490,16 @@ export const RegisterView = ({
             className="text-input code-font"
             placeholder="例: AA123456B"
             value={serialInput}
-            onChange={(e) => setSerialInput(e.target.value)}
+            onChange={(e) => setSerialInput(normalizeSerialInput(e.target.value))}
             maxLength={12}
+            inputMode="text"
             autoCapitalize="characters"
             autoComplete="off"
             autoCorrect="off"
-            spellCheck="false"
+            spellCheck={false}
+            enterKeyHint="done"
           />
+          <p className="input-hint">全角・小文字でも自動変換します</p>
 
           {/* リアルタイム正規化プレビュー */}
           {serialInput && (

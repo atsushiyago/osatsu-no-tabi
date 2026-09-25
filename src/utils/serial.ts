@@ -19,6 +19,11 @@ export function normalizeSerialNumber(input: string): string {
   return normalized;
 }
 
+/** Normalize interactive serial input without changing validation rules. */
+export function normalizeSerialInput(input: string): string {
+  return normalizeSerialNumber(input.normalize('NFKC')).replace(/[^A-Z0-9]/g, '');
+}
+
 /**
  * 日本の紙幣記番号のフォーマットチェック
  * 主なパターン:
