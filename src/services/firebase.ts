@@ -1,4 +1,9 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import {
+  initializeAppCheck,
+  ReCaptchaEnterpriseProvider,
+  type AppCheck,
+} from 'firebase/app-check';
 import { initializeFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -10,18 +15,83 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+const recaptchaEnterpriseSiteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY;
+
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey &&
   firebaseConfig.projectId &&
   firebaseConfig.apiKey !== 'YOUR_API_KEY'
 );
 
+export const isAppCheckConfigured = Boolean(
+  recaptchaEnterpriseSiteKey &&
+  recaptchaEnterpriseSiteKey !== 'YOUR_SITE_KEY' &&
+  recaptchaEnterpriseSiteKey !== 'your-recaptcha-enterprise-site-key'
+);
+
+// 開発環境（DEV）限定の Debug Provider 設定
+// ※ 本番ビルド（import.meta.env.PROD）では Dead Code Elimination により安全に無効化されます
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  const debugEnv = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG;
+  if (debugEnv === 'true' || debugEnv === true) {
+    // @ts-expect-error FIREBASE_APPCHECK_DEBUG_TOKEN is used by Firebase App Check SDK
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    console.info(
+      '【開発環境】Firebase App Check: Localhost Debug Provider を有効化しました。ブラウザコンソールに出力されるDebug TokenをFirebase Consoleに登録してください。'
+    );
+  } else if (typeof debugEnv === 'string' && debugEnv.length > 0) {
+    // @ts-expect-error FIREBASE_APPCHECK_DEBUG_TOKEN is used by Firebase App Check SDK
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = debugEnv;
+    console.info('【開発環境】Firebase App Check: カスタムDebug Tokenを設定しました。');
+  }
+}
+
 let app: FirebaseApp | null = null;
+let appCheck: AppCheck | null = null;
 let db: Firestore | null = null;
 
 if (isFirebaseConfigured) {
   try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
+    // 1. App Check の初期化（Firestore 初期化の前）
+    if (typeof window !== 'undefined' && !appCheck) {
+      if (isAppCheckConfigured) {
+        try {
+          appCheck = initializeAppCheck(app, {
+            provider: new ReCaptchaEnterpriseProvider(recaptchaEnterpriseSiteKey),
+            isTokenAutoRefreshEnabled: true,
+          });
+          console.info('Firebase App Check (reCAPTCHA Enterprise) successfully initialized.');
+        } catch (appCheckErr) {
+          console.warn('Failed to initialize Firebase App Check:', appCheckErr);
+        }
+      } else if (
+        import.meta.env.DEV &&
+        // @ts-expect-error FIREBASE_APPCHECK_DEBUG_TOKEN is defined on self in dev mode
+        Boolean(self.FIREBASE_APPCHECK_DEBUG_TOKEN)
+      ) {
+        try {
+          appCheck = initializeAppCheck(app, {
+            provider: new ReCaptchaEnterpriseProvider('dummy-dev-site-key'),
+            isTokenAutoRefreshEnabled: true,
+          });
+          console.info('Firebase App Check: Initialized with Debug Provider in development.');
+        } catch (appCheckErr) {
+          console.warn('Failed to initialize Firebase App Check in debug mode:', appCheckErr);
+        }
+      } else {
+        if (import.meta.env.PROD) {
+          console.warn(
+            '【本番環境警告】VITE_RECAPTCHA_ENTERPRISE_SITE_KEY が未設定です。Cloudflare (Workers Buildsの環境変数) に設定されるまで、Firestoreへのリクエストは未認証(Unverified)として送信されます。'
+          );
+        } else {
+          console.info('Firebase App Check: Site key not configured. Running without App Check in local mode.');
+        }
+      }
+    }
+
+    // 2. Firestore の初期化（iPhone遅延対策の forceLongPolling を維持）
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
     });
@@ -40,4 +110,4 @@ if (isFirebaseConfigured) {
   }
 }
 
-export { app, db };
+export { app, appCheck, db };

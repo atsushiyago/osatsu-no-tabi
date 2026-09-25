@@ -196,8 +196,9 @@ git push -u origin main
 | `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storageバケット |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | 送信者ID |
 | `VITE_FIREBASE_APP_ID` | Firebase アプリID |
+| `VITE_RECAPTCHA_ENTERPRISE_SITE_KEY` | reCAPTCHA Enterprise Web公開Site Key（スコアベース） |
 
-※ 未設定の場合、本番環境ではデータの誤保存事故を防ぐため、localStorageへのフォールバックを行わずエラー画面が表示される安全設計になっています。
+※ 未設定の場合、本番環境ではデータの誤保存事故を防ぐため、localStorageへのフォールバックを行わずエラー画面が表示される安全設計になっています（App Checkキー未設定時は警告を表示しつつ移行フェーズとして動作）。
 
 #### 5. デプロイと動作確認
 - **Save and Deploy** をクリックします。
@@ -240,15 +241,121 @@ npm run deploy
 
 ---
 
-## 🛡️ 次のセキュリティ強化ステップ: Firebase App Check
+## 🛡️ Firebase App Check + reCAPTCHA Enterprise 導入と運用ガイド
 
-本番公開完了後の次工程として **Firebase App Check** の導入を推奨します。
-未認証のスクリプトや不正なクライアントからのFirestore直接呼び出しを遮断し、正規のWebアプリ経由のトラフィックのみを許可します。
+本プロジェクトでは、正規のWebアプリ経由以外のトラフィック（curlや自動化スクリプト等によるFirestore直接呼び出し・大量投稿）のハードルを上げるため、**Firebase App Check（reCAPTCHA Enterprise）** を導入しています。
 
-> [!NOTE]
-> **最新公式推奨: reCAPTCHA Enterprise の利用**
-> Firebase公式ドキュメントでは、新規Web統合におけるApp Checkプロバイダとして従来のreCAPTCHA v3ではなく **reCAPTCHA Enterprise**（`ReCaptchaEnterpriseProvider`）の利用が推奨されています。
-> Cloudflare公開後、Firebase ConsoleおよびGoogle Cloud ConsoleでreCAPTCHA Enterpriseキーを取得し、アプリ初期化コード（`firebase.ts`）に統合する予定です。
+### 1. セキュリティ上の位置付け（できること・できないこと）
+
+App Checkは強力な防御層ですが、万能ではありません。Firestore Security Rulesと組み合わせた「多層防御」として機能します。
+
+* **期待できること**:
+  * curl、Pythonスクリプト、PostmanなどからFirestore Web APIを直接叩く単純な自動化・連投を効果的に遮断・抑止。
+  * 正規のWebアプリドメイン以外からの悪意ある乱用リクエストを大幅に低減。
+  * Firestore Security Rulesと連携した多層防御の実現。
+* **完全に防げないこと**:
+  * 実ブラウザ（Headless Chrome / Playwright等）を自動操作する高度なボット。
+  * 有効なApp Checkトークンを正規に取得した上での攻撃。
+  * 実在する紙幣を装った虚偽データの入力。
+  * 正規ユーザーによる仕様内のいたずら。
+  * ※「100%完全に不正をゼロにする」ものではなく、攻撃者のコストと難易度を劇的に引き上げる仕組みです。
+
+---
+
+### 2. Google Cloud & Firebase Console での設定手順（10ステップ）
+
+管理者の方がGoogle Cloud ConsoleおよびFirebase Consoleで実施する手順です。
+
+1. **Google Cloud Console**（[console.cloud.google.com](https://console.cloud.google.com/)）にアクセスし、Firebaseプロジェクトと同じGoogle Cloudプロジェクトを選択。
+2. 左メニュー「セキュリティ」または検索バーから **reCAPTCHA Enterprise**（Fraud Defense）を開く。
+3. 「**キーを作成**（Create Key）」をクリック。
+4. **プラットフォームの種類**: 「**Webサイト**」を選択。
+5. **キータイプ**: **スコアベースのキー**（Score-based key）を選択。（※チェックボックス型は使用不可）
+6. **ドメインの確認**: 「ドメインの確認を使用する」にチェックを入れたままにする。
+7. **ドメインリストに本番ドメインを追加**:
+   * Cloudflare Workersの本番URL（例: `osatsu-no-tabi.<your-subdomain>.workers.dev`）
+   * 将来カスタムドメインを設定する場合はそのドメイン（例: `osatsu.example.com`）
+   * ⚠️ **`localhost` は本番用reCAPTCHAキーの許可ドメインに絶対に追加しないでください**（後述のDebug Providerを使用します）。
+8. 「キーを作成」をクリックし、生成された **サイトキー（Site Key）** をコピー。
+9. **Firebase Console**（[console.firebase.google.com](https://console.firebase.google.com/)）を開き、左メニュー「**すべてのプロダクト**」>「**App Check**」を選択。
+10. 「アプリ」タブで対象のウェブアプリを選択し、プロバイダとして「**reCAPTCHA Enterprise**」を選択して、コピーしたサイトキーを入力して保存。
+
+---
+
+### 3. Cloudflare Workers Builds の環境変数設定
+
+Cloudflare Workers Buildsの設定画面で、ビルド時環境変数としてサイトキーを登録します。
+
+* 設定場所: **Cloudflare Dashboard** → 対象プロジェクト → **Settings** → **Builds**（または作成画面の「Environment variables」）
+* 変数名: `VITE_RECAPTCHA_ENTERPRISE_SITE_KEY`
+* 値: Google Cloud Consoleで取得したサイトキー
+* ※ Worker runtimeのSecretではなく、**Build Environment Variable** として設定してください（Viteビルド時にJSバンドルへ埋め込まれます）。
+
+---
+
+### 4. Enforcement（適用）有効化の手順とメトリクス確認
+
+> [!WARNING]
+> **デプロイ直後は絶対に「Enforce（適用）」をクリックしないでください。**
+> まずはメトリクス収集モードで正常なトラフィックがVerifiedになることを確認します。
+
+#### ロールアウトの流れ:
+1. コードを `main` へプッシュし、Cloudflareへ再デプロイ。
+2. 手持ちの **iPhone・Android・Mac** から本番サイトにアクセスし、紙幣の閲覧・登録を実際にテスト。
+3. URLに `?debug=timing` を付けてアクセスし、右下の計測モニタで `App Check: reCAPTCHA Enterprise 有効` と表示されることを確認。
+4. **メトリクスの確認**:
+   * **Firebase Console** → **App Check** → **Cloud Firestore** を選択。
+   * **Request metrics（リクエスト メトリクス）** グラフを確認。
+   * **Verified requests**（検証済みリクエスト）が正常に記録されていることを確認。
+   * **Unverified requests**（未検証リクエスト）やエラーが問題ない水準であることを確認。
+5. **Enforcement 有効化**:
+   * 正規端末からの通信がVerifiedとして安定して記録されていることを確認後、Firebase ConsoleのCloud Firestoreの行で「**適用（Enforce）**」をクリックします。
+
+#### Enforcement 前と後で起きること:
+* **Enforcement前（導入フェーズ）**:
+  App Checkトークンが付与されていないリクエスト（curl等の直接通信やサイトキー未設定クライアント）もFirestoreを通過しますが、メトリクス上に「Unverified」として記録されます。本番サービスを停止させずに安全に動作確認できます。
+* **Enforcement後（本番運用フェーズ）**:
+  有効なApp Checkトークンを持たないリクエストは、Firestoreバックエンド側で即座に拒否（`permission-denied`）されます。正規Webアプリ以外からの直接呼び出しが完全に遮断されます。
+
+---
+
+### 5. localhost 開発環境での Debug Provider 利用手順
+
+本番用reCAPTCHAキーの許可ドメインに `localhost` を含めることなく、Enforcement後もローカル開発を継続するための公式デバッグ手順です。
+
+1. ローカルの `.env` ファイルに以下を追加:
+   ```ini
+   VITE_FIREBASE_APPCHECK_DEBUG=true
+   ```
+2. `npm run dev` でローカルサーバーを起動し、ブラウザで開発コンソール（F12 / Console）を開く。
+3. 初回アクセス時にコンソールへ以下のようなDebug Tokenが出力されます:
+   ```text
+   App Check debug token: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX. You will need to add it to your app's App Check settings in the Firebase console for it to work.
+   ```
+4. **Firebase Console** → **App Check** → 「**アプリ**」タブ → 対象ウェブアプリの三点リーダー（︙） → 「**デバッグ トークンを管理**」を開く。
+5. コンソールに表示されたデバッグトークンを貼り付けて登録（名前は例: `Localhost Mac`）。
+6. これで、ローカル開発環境からのFirestoreアクセスも正規の「Verified」として認証されます。
+* ※ `VITE_FIREBASE_APPCHECK_DEBUG` の処理は `import.meta.env.DEV` で保護されており、本番バンドル（`npm run build`）からは完全に除去されます。
+
+---
+
+### 6. トークンTTL・自動リフレッシュ・料金について
+
+* **自動リフレッシュ**: `isTokenAutoRefreshEnabled: true` を設定済みです。SDKがバックグラウンドで期限切れ前に自動でトークンを更新します。
+* **トークンTTL（有効期限）**:
+  Firebase側のデフォルト値（標準1時間、設定可能範囲: 30分〜7日）をそのまま維持します。短すぎるTTLはレイテンシとassessment回数を増加させるため、デフォルト維持が推奨されます。
+* **料金**:
+  * reCAPTCHA Enterprise は月間 **10,000 assessments（評価）まで無料** です。
+  * **「1ページビュー = 1 assessment」ではありません**。App Checkトークンは有効期間内キャッシュされ再利用されるため、1訪問者のセッション内でのassessment発生は通常1回（長時間滞在時のリフレッシュ時のみ追加）です。
+  * ※料金体系は変更される可能性があるため、詳細は[Google Cloud reCAPTCHA Enterprise 料金公式ページ](https://cloud.google.com/recaptcha-enterprise/pricing)をご確認ください。
+
+---
+
+### 7. iPhone性能（Long Polling対策）との両立
+
+App Check導入後も、iPhone（iOS WebKit）での30秒ハングを防止する `initializeFirestore(app, { experimentalForceLongPolling: true })` は完全維持されています。
+
+本番URLに `?debug=timing` を付けてアクセスすることで、右下の「Firestore 計測ログ」パネルから、App Check導入前後でクエリ所要時間（通常200〜600ms程度）に悪化がないことをいつでも実機検証できます。
 
 ---
 

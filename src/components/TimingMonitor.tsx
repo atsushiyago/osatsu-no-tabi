@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { subscribeTiming, clearTimingLogs, type TimingEntry } from '../utils/timing';
-import { Activity, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { isAppCheckConfigured } from '../services/firebase';
+import { Activity, ChevronDown, ChevronUp, Trash2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export const TimingMonitor = () => {
   const isVisible =
@@ -107,6 +108,43 @@ export const TimingMonitor = () => {
               >
                 <Trash2 size={12} /> クリア
               </button>
+            </div>
+
+            <div
+              style={{
+                fontSize: '10px',
+                padding: '4px 6px',
+                borderRadius: 4,
+                marginBottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                background: isAppCheckConfigured
+                  ? 'rgba(16, 185, 129, 0.15)'
+                  : 'rgba(234, 88, 12, 0.15)',
+                color: isAppCheckConfigured ? '#34d399' : '#fb923c',
+                border: `1px solid ${isAppCheckConfigured ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 146, 60, 0.3)'}`,
+              }}
+            >
+              {isAppCheckConfigured ? (
+                <>
+                  <ShieldCheck size={12} />
+                  <span>App Check: reCAPTCHA Enterprise 有効</span>
+                </>
+              ) : (
+                <>
+                  <ShieldAlert size={12} />
+                  <span>
+                    App Check: 未設定 (
+                    {import.meta.env.DEV &&
+                    // @ts-expect-error FIREBASE_APPCHECK_DEBUG_TOKEN check in dev
+                    Boolean(self.FIREBASE_APPCHECK_DEBUG_TOKEN)
+                      ? 'Debug Provider 有効'
+                      : '未認証リクエスト'}
+                    )
+                  </span>
+                </>
+              )}
             </div>
             {entries.length === 0 ? (
               <div style={{ color: '#64748b', textAlign: 'center', padding: '12px 0' }}>ログはありません</div>
