@@ -362,10 +362,14 @@ export interface PreprocessedPass {
   stats: ImagePixelStats;
 }
 
-export interface FirstPassComparison {
-  first: { rawText: string; confidence: number; durationMs: number };
-  second: { rawText: string; confidence: number; durationMs: number };
-  outcome: 'First-recognition warm-up effect confirmed' | 'Warm-up by repeated recognize not confirmed' | 'First recognition succeeded' | 'Inconclusive';
+export interface PsmWhitelistDiagnostic {
+  psmName: 'SINGLE_LINE' | 'SINGLE_WORD' | 'RAW_LINE';
+  whitelist: 'on' | 'off';
+  rawText: string;
+  compactText: string;
+  confidence: number;
+  durationMs: number;
+  isValid: boolean;
   error?: string;
 }
 
@@ -537,7 +541,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
-  onFirstPassComparison?: (comparison: FirstPassComparison) => void
+  onPsmDiagnostics?: (results: PsmWhitelistDiagnostic[]) => void
 ): Promise<string[]> {
   const debugTiming = isDebugTiming();
 
@@ -547,7 +551,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?.('OCRエンジンを読み込み中...');
 
   // 1. Tesseract.js の動的インポート (初期バンドルサイズ削減)
-  const { createWorker } = await import('tesseract.js');
+  const { createWorker, PSM } = await import('tesseract.js');
 
   if (debugTiming) {
     loadTime = performance.now() - startTime;
@@ -604,77 +608,86 @@ export async function recognizeBanknoteSerialFromImage(
       throw err;
     }
 
+    if (debugTiming) {
+      const diagnosticResults: PsmWhitelistDiagnostic[] = [];
+      const psmCases = [
+        { name: 'SINGLE_LINE' as const, value: PSM.SINGLE_LINE },
+        { name: 'SINGLE_WORD' as const, value: PSM.SINGLE_WORD },
+        { name: 'RAW_LINE' as const, value: PSM.RAW_LINE },
+      ];
+
+      for (const psm of psmCases) {
+        for (const whitelistEnabled of [true, false]) {
+          const whitelist = whitelistEnabled ? 'on' : 'off';
+          const label = `${psm.name} whitelist ${whitelist}`;
+          onProgress?.(`OCR診断中... (${label})`);
+          onRecognizeEvent?.({ type: 'start', pass: label });
+          let recognizeStartedAt: number | null = null;
+          let rawText = '';
+          let confidence = 0;
+          let durationMs = 0;
+          let errorMessage: string | undefined;
+
+          try {
+            await worker.setParameters({
+              tessedit_pageseg_mode: psm.value,
+              tessedit_char_whitelist: whitelistEnabled ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' : '',
+            });
+            recognizeStartedAt = performance.now();
+            const ret = await worker.recognize(imageFileOrBlob);
+            rawText = ret.data.text || '';
+            confidence = ret.data.confidence ?? 0;
+            durationMs = performance.now() - recognizeStartedAt;
+            onRecognizeEvent?.({ type: 'end', pass: label });
+          } catch (err) {
+            const error = err as Error & { code?: string };
+            durationMs = recognizeStartedAt === null ? 0 : performance.now() - recognizeStartedAt;
+            errorMessage = error.message || String(err);
+            console.log(`[OCR Debug] ${label} error=${errorMessage}`);
+          }
+
+          const compactText = rawText.replace(/\s/g, '');
+          diagnosticResults.push({
+            psmName: psm.name,
+            whitelist,
+            rawText,
+            compactText,
+            confidence,
+            durationMs,
+            isValid: validateSerialNumber(compactText).isValid,
+            error: errorMessage,
+          });
+          onPsmDiagnostics?.([...diagnosticResults]);
+          console.log(`[OCR Debug] ${label} raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" compact="${compactText}" confidence=${confidence.toFixed(1)}% time=${durationMs.toFixed(0)}ms valid=${validateSerialNumber(compactText).isValid}`);
+        }
+      }
+
+      // Restore the normal banknote OCR settings before running the existing passes.
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.SINGLE_LINE,
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      });
+    }
+
     for (let i = 0; i < passes.length; i++) {
       const pass = passes[i];
       onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
 
       const passStart = debugTiming ? performance.now() : 0;
-      onRecognizeEvent?.({ type: 'start', pass: debugTiming && i === 0 ? `${pass.name} (first)` : pass.name });
+      onRecognizeEvent?.({ type: 'start', pass: pass.name });
       let ret;
       try {
         ret = await worker.recognize(pass.blob);
       } catch (err) {
         const error = err as Error & { code?: string };
         onRecognizeEvent?.({ type: 'error', pass: pass.name, message: error.message, code: error.code });
-        if (debugTiming && i === 0) {
-          onFirstPassComparison?.({
-            first: { rawText: '', confidence: 0, durationMs: performance.now() - passStart },
-            second: { rawText: '', confidence: 0, durationMs: 0 },
-            outcome: 'Inconclusive',
-            error: error.message || String(err),
-          });
-        }
         throw err;
       }
       const rawText = ret.data.text || '';
       const confidence = ret.data.confidence ?? 0;
       const passDuration = debugTiming ? performance.now() - passStart : 0;
 
-      if (debugTiming && i === 0) {
-        onRecognizeEvent?.({ type: 'end', pass: `${pass.name} (first)` });
-        const secondStart = performance.now();
-        let secondRawText = '';
-        let secondConfidence = 0;
-        let secondDuration = 0;
-        let secondError: string | undefined;
-        onRecognizeEvent?.({ type: 'start', pass: `${pass.name} (second)` });
-        try {
-          const secondRet = await worker.recognize(pass.blob);
-          secondRawText = secondRet.data.text || '';
-          secondConfidence = secondRet.data.confidence ?? 0;
-          secondDuration = performance.now() - secondStart;
-          onRecognizeEvent?.({ type: 'end', pass: `${pass.name} (second)` });
-        } catch (err) {
-          const error = err as Error & { code?: string };
-          secondDuration = performance.now() - secondStart;
-          secondError = error.message || String(err);
-          onRecognizeEvent?.({ type: 'error', pass: `${pass.name} (second)`, message: secondError, code: error.code });
-        }
-
-        const firstHasText = rawText.trim().length > 0;
-        const secondHasText = secondRawText.trim().length > 0;
-        const outcome = secondError
-          ? 'Inconclusive'
-          : !firstHasText && secondHasText
-            ? 'First-recognition warm-up effect confirmed'
-            : !firstHasText && !secondHasText
-              ? 'Warm-up by repeated recognize not confirmed'
-              : firstHasText && secondHasText
-                ? 'First recognition succeeded'
-                : 'Inconclusive';
-        const comparison: FirstPassComparison = {
-          first: { rawText, confidence, durationMs: passDuration },
-          second: { rawText: secondRawText, confidence: secondConfidence, durationMs: secondDuration },
-          outcome,
-          error: secondError,
-        };
-        onFirstPassComparison?.(comparison);
-        console.log(`[OCR Debug] First recognition: raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${confidence.toFixed(1)}% time=${passDuration.toFixed(0)}ms`);
-        console.log(`[OCR Debug] Second recognition: raw="${secondRawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${secondConfidence.toFixed(1)}% time=${secondDuration.toFixed(0)}ms`);
-        console.log(`[OCR Debug] ${outcome}`);
-      } else {
-        onRecognizeEvent?.({ type: 'end', pass: pass.name });
-      }
+      onRecognizeEvent?.({ type: 'end', pass: pass.name });
 
       // 候補抽出
       const passCandidates = extractSerialCandidates(rawText, 3);

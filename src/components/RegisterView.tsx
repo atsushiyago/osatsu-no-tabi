@@ -152,9 +152,9 @@ export const RegisterView = ({
             console.log(`[OCR Debug] recognizeEnd pass=${event.pass}`);
           }
         },
-        (comparison) => {
+        (results) => {
           if (!isTimingDebug) return;
-          setOcrDebugData((current) => current ? { ...current, firstPassComparison: comparison } : current);
+          setOcrDebugData((current) => current ? { ...current, psmDiagnostics: results } : current);
         }
       );
 

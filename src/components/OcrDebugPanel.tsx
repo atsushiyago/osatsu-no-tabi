@@ -1,5 +1,5 @@
 import type { CropMetadata } from './CropModal';
-import type { FirstPassComparison, ImagePixelStats, PreprocessedPass } from '../utils/ocr';
+import type { ImagePixelStats, PreprocessedPass, PsmWhitelistDiagnostic } from '../utils/ocr';
 
 export interface OcrDebugData {
   rawImageUrl: string;
@@ -10,7 +10,7 @@ export interface OcrDebugData {
   croppedStats?: ImagePixelStats;
   passes: PreprocessedPass[];
   error?: { pass: string; message: string; code?: string };
-  firstPassComparison?: FirstPassComparison;
+  psmDiagnostics?: PsmWhitelistDiagnostic[];
 }
 
 interface OcrDebugPanelProps {
@@ -18,7 +18,7 @@ interface OcrDebugPanelProps {
 }
 
 export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
-  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error, firstPassComparison } = data;
+  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error, psmDiagnostics = [] } = data;
 
   const contrastPass = passes.find((p) => p.name.includes('Contrast'));
   const otsuPass = passes.find((p) => p.name.includes('Otsu'));
@@ -83,21 +83,34 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
         </div>
       )}
 
-      {firstPassComparison && (
-        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', fontFamily: 'monospace', lineHeight: 1.6 }}>
-          <div style={{ color: '#38bdf8', fontWeight: 700 }}>Same-pass consecutive recognition comparison</div>
-          <div style={{ marginTop: '4px' }}>First recognition:</div>
-          <div>raw text: <strong>{firstPassComparison.first.rawText || '(empty)'}</strong></div>
-          <div>confidence: <strong>{firstPassComparison.first.confidence.toFixed(1)}%</strong></div>
-          <div>processing time: <strong>{firstPassComparison.first.durationMs.toFixed(0)} ms</strong></div>
-          <div style={{ marginTop: '6px' }}>Second recognition:</div>
-          <div>raw text: <strong>{firstPassComparison.second.rawText || '(empty)'}</strong></div>
-          <div>confidence: <strong>{firstPassComparison.second.confidence.toFixed(1)}%</strong></div>
-          <div>processing time: <strong>{firstPassComparison.second.durationMs.toFixed(0)} ms</strong></div>
-          {firstPassComparison.error && <div style={{ color: '#fca5a5' }}>error: {firstPassComparison.error}</div>}
-          <div style={{ marginTop: '8px', color: firstPassComparison.outcome === 'First-recognition warm-up effect confirmed' ? '#fbbf24' : '#4ade80' }}>
-            {firstPassComparison.outcome}
-          </div>
+      {psmDiagnostics.length > 0 && (
+        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', fontFamily: 'monospace', lineHeight: 1.5, overflowX: 'auto' }}>
+          <div style={{ color: '#38bdf8', fontWeight: 700, marginBottom: '8px' }}>クロップ画像 PSM / whitelist 比較（6条件）</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11px' }}>
+            <thead>
+              <tr style={{ color: '#94a3b8', borderBottom: '1px solid #475569' }}>
+                {['PSM', 'Whitelist', 'Raw text', '空白除去後', 'Confidence', 'Time', '形式', 'Error'].map((heading) => (
+                  <th key={heading} style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {psmDiagnostics.map((result, index) => (
+                <tr key={`${result.psmName}-${result.whitelist}-${index}`} style={{ borderBottom: '1px solid #334155' }}>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.psmName}</td>
+                  <td style={{ padding: '5px 7px' }}>{result.whitelist}</td>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'pre-wrap' }}>{result.rawText || '(empty)'}</td>
+                  <td style={{ padding: '5px 7px' }}>{result.compactText || '(empty)'}</td>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.confidence.toFixed(1)}%</td>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.durationMs.toFixed(0)} ms</td>
+                  <td style={{ padding: '5px 7px', color: result.isValid ? '#4ade80' : '#fca5a5' }}>
+                    {result.isValid ? 'Valid' : 'Invalid'}
+                  </td>
+                  <td style={{ padding: '5px 7px', color: '#fca5a5' }}>{result.error || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
