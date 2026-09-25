@@ -89,6 +89,62 @@ async function seedLegacyBillForTest(billId, isoTime) {
   if (!response.ok) throw new Error(`Legacy fixture create failed: ${response.status} ${await response.text()}`);
 }
 
+let migrationBillIndex = 1;
+async function writeBillWithMigrationRateLimit({ rateOverrides = {} } = {}) {
+  const billId = `MC${String(migrationBillIndex++).padStart(6, '0')}A`;
+  const billRef = doc(authenticatedDb, 'bills', billId);
+  const rateRef = doc(authenticatedDb, 'rateLimits', auth.currentUser.uid);
+  const sightingRef = doc(collection(authenticatedDb, 'sightings'));
+  const nowIso = new Date().toISOString();
+
+  await runTransaction(authenticatedDb, async (transaction) => {
+    const [billSnapshot, rateSnapshot] = await Promise.all([
+      transaction.get(billRef),
+      transaction.get(rateRef),
+    ]);
+    const rate = rateSnapshot.exists() ? rateSnapshot.data() : null;
+    const step = billSnapshot.exists() ? billSnapshot.data().sightingsCount + 1 : 1;
+    transaction.set(billRef, {
+      id: billId,
+      serialNumber: billId,
+      denomination: 1000,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      sightingsCount: step,
+      totalDistanceKm: 0,
+      firstSightedAt: nowIso,
+      lastSightedAt: nowIso,
+      lastSightedAtServer: serverTimestamp(),
+    });
+    transaction.set(sightingRef, {
+      id: sightingRef.id,
+      billId,
+      step,
+      prefecture: '東京都',
+      municipality: '千代田区',
+      latitudeApprox: 35.6938,
+      longitudeApprox: 139.7532,
+      createdAt: nowIso,
+      distanceFromPrevKm: 0,
+      daysFromPrev: 0,
+    });
+
+    const shortExpired = !rate || Date.now() - rate.shortWindowStartedAt.toMillis() >= 10 * 60 * 1000;
+    const dailyExpired = !rate || Date.now() - rate.dailyWindowStartedAt.toMillis() >= 24 * 60 * 60 * 1000;
+    transaction.set(rateRef, {
+      shortWindowStartedAt: shortExpired ? serverTimestamp() : rate.shortWindowStartedAt,
+      shortCount: shortExpired ? 1 : rate.shortCount + 1,
+      dailyWindowStartedAt: dailyExpired ? serverTimestamp() : rate.dailyWindowStartedAt,
+      dailyCount: dailyExpired ? 1 : rate.dailyCount + 1,
+      updatedAt: serverTimestamp(),
+      lastOperationBillId: billId,
+      lastOperationSightingId: sightingRef.id,
+      ...rateOverrides,
+    });
+  });
+  return billId;
+}
+
 async function runTests() {
   console.log('=== Firestore Security Rules 網羅テスト開始 ===\n');
 
@@ -704,6 +760,50 @@ async function runTests() {
         injectedMaliciousField: 'exploit',
       });
     });
+  });
+
+  await assertPass('新frontend + migration compat: bill/sighting/rateLimitsを同一transactionで作成', async () => {
+    const billId = await writeBillWithMigrationRateLimit();
+    const rate = (await getDoc(doc(authenticatedDb, 'rateLimits', anonymousUser.uid))).data();
+    if (rate.shortCount !== 1 || rate.dailyCount !== 1 || rate.lastOperationBillId !== billId) {
+      throw new Error('rate-limit initial count or operation identity is incorrect');
+    }
+    if (!(await getDoc(doc(authenticatedDb, 'bills', billId))).exists()) {
+      throw new Error('bill write did not commit with rate limit');
+    }
+    await getDoc(doc(authenticatedDb, 'sightings', rate.lastOperationSightingId));
+  });
+
+  await assertPass('新frontend + migration compat: 次の操作はwindow内でcountを1だけ増やす', async () => {
+    await writeBillWithMigrationRateLimit();
+    const rate = (await getDoc(doc(authenticatedDb, 'rateLimits', anonymousUser.uid))).data();
+    if (rate.shortCount !== 2 || rate.dailyCount !== 2) {
+      throw new Error(`expected counts 2/2, got ${rate.shortCount}/${rate.dailyCount}`);
+    }
+  });
+
+  await assertReject('migration compat: 任意count jumpをpublic writeと同時に拒否', async () => {
+    await writeBillWithMigrationRateLimit({ rateOverrides: { shortCount: 5, dailyCount: 5 } });
+  });
+
+  await assertReject('migration compat: 他UIDのrateLimits readを拒否', async () => {
+    await getDoc(doc(authenticatedDb, 'rateLimits', 'another-anonymous-uid'));
+  });
+
+  await assertReject('migration compat: 他UIDのrateLimits writeを拒否', async () => {
+    await setDoc(doc(authenticatedDb, 'rateLimits', 'another-anonymous-uid'), {
+      shortWindowStartedAt: serverTimestamp(),
+      shortCount: 1,
+      dailyWindowStartedAt: serverTimestamp(),
+      dailyCount: 1,
+      updatedAt: serverTimestamp(),
+      lastOperationBillId: 'MC999999A',
+      lastOperationSightingId: 'fake-sighting',
+    });
+  });
+
+  await assertReject('migration compat: rateLimits deleteを拒否', async () => {
+    await deleteDoc(doc(authenticatedDb, 'rateLimits', anonymousUser.uid));
   });
 
   console.log(`\n=== テスト結果サマリー ===`);

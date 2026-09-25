@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { Compass, PlusCircle, Search, WalletCards } from 'lucide-react';
 import { HomeView } from './components/HomeView';
 import { RegisterView } from './components/RegisterView';
@@ -21,14 +21,6 @@ type TrackedBillsLoadResult = {
   error: boolean;
 };
 
-function scrollToPageTop() {
-  window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: window.scrollX, behavior: 'auto' });
-    });
-  });
-}
-
 export function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('home');
   const [selectedSerial, setSelectedSerial] = useState<string>('');
@@ -39,6 +31,23 @@ export function App() {
   const [trackingNotice, setTrackingNotice] = useState(false);
   const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
   const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
+  const [routeRevision, setRouteRevision] = useState(0);
+
+  useEffect(() => {
+    if (!('scrollRestoration' in window.history)) return;
+    const previousScrollRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    return () => {
+      window.history.scrollRestoration = previousScrollRestoration;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: window.scrollX, behavior: 'auto' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [routeRevision]);
 
   useEffect(() => {
     const unsubscribe = observeAuthState((user) => {
@@ -82,7 +91,7 @@ export function App() {
   // URLハッシュまたはパスのパース (/bill/:serial)
   useEffect(() => {
     const handleUrlChange = () => {
-      scrollToPageTop();
+      setRouteRevision((revision) => revision + 1);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
 
@@ -113,7 +122,7 @@ export function App() {
   }, []);
 
   const navigateTo = (view: ViewMode, serial?: string) => {
-    scrollToPageTop();
+    setRouteRevision((revision) => revision + 1);
     if (view === 'bill' && serial) {
       const norm = normalizeSerialNumber(serial);
       setSelectedSerial(norm);

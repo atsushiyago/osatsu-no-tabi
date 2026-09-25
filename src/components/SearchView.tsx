@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Search, Compass, ArrowRight } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
-import { normalizeSerialInput, normalizeSerialNumber, formatSerialDisplay } from '../utils/serial';
+import { normalizeSerialInput, formatSerialDisplay } from '../utils/serial';
+import { prepareSerialSearch } from '../utils/serialSearch';
+import { isDebugTiming } from '../utils/debug';
 
 interface SearchViewProps {
   onBillFound: (serial: string) => void;
@@ -13,21 +15,33 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const isComposing = useRef(false);
 
-  const normSerial = normalizeSerialNumber(searchInput);
+  const normSerial = normalizeSerialInput(searchInput);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!normSerial) return;
+    const form = e.currentTarget as HTMLFormElement;
+    const input = form.elements.namedItem('serial') as HTMLInputElement | null;
+    const { rawInput, serial, documentId } = prepareSerialSearch(input?.value ?? searchInput);
+    if (!serial) return;
+
+    if (isDebugTiming()) {
+      console.debug('[Search Debug] raw input=', rawInput);
+      console.debug('[Search Debug] normalized input=', serial);
+      console.debug('[Search Debug] search serial=', serial);
+      console.debug('[Search Debug] target document ID=', documentId);
+    }
 
     setIsSearching(true);
     setNotFound(false);
-    setSearchedSerial(normSerial);
+    setSearchInput(serial);
+    setSearchedSerial(serial);
 
     try {
-      const bill = await getBillBySerial(normSerial);
+      const bill = await getBillBySerial(documentId);
       if (bill) {
-        onBillFound(normSerial);
+        onBillFound(serial);
       } else {
         setNotFound(true);
       }
@@ -63,12 +77,19 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           <div style={{ position: 'relative' }}>
             <input
               id="searchSerialInput"
+              name="serial"
               type="text"
               className="text-input code-font"
               placeholder="例: AA123456B"
               value={searchInput}
               onChange={(e) => {
-                setSearchInput(normalizeSerialInput(e.target.value));
+                setSearchInput(isComposing.current ? e.target.value : normalizeSerialInput(e.target.value));
+                setNotFound(false);
+              }}
+              onCompositionStart={() => { isComposing.current = true; }}
+              onCompositionEnd={(e) => {
+                isComposing.current = false;
+                setSearchInput(normalizeSerialInput(e.currentTarget.value));
                 setNotFound(false);
               }}
               maxLength={12}

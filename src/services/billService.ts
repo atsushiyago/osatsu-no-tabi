@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   serverTimestamp,
+  getDoc,
   getDocs,
   query,
   where,
@@ -14,7 +15,7 @@ import {
   count,
   sum,
 } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from './firebase';
+import { auth, db, isFirebaseConfigured } from './firebase';
 import type {
   Bill,
   Sighting,
@@ -26,6 +27,7 @@ import type {
 import { calculateDistanceKm } from '../utils/geo';
 import { normalizeSerialNumber } from '../utils/serial';
 import { startTiming } from '../utils/timing';
+import { isDebugTiming } from '../utils/debug';
 
 /**
  * Firestore書き込み用データから undefined のフィールドを除外するヘルパー
@@ -42,6 +44,45 @@ function sanitizeFirestoreData<T extends Record<string, any>>(obj: T): T {
 
 const LOCAL_STORAGE_BILLS_KEY = 'osatsu_bills_repo';
 const LOCAL_STORAGE_SIGHTINGS_KEY = 'osatsu_sightings_repo';
+const SHORT_RATE_WINDOW_MS = 10 * 60 * 1000;
+const DAILY_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export class RegistrationRateLimitError extends Error {
+  readonly window: 'short' | 'daily';
+
+  constructor(window: 'short' | 'daily') {
+    super(window === 'daily' ? 'Daily registration limit reached' : 'Short-term registration limit reached');
+    this.name = 'RegistrationRateLimitError';
+    this.window = window;
+  }
+}
+
+function nextRateLimitData(
+  current: Record<string, any> | null,
+  billId: string,
+  sightingId: string
+): Record<string, any> {
+  const now = Date.now();
+  const shortStartedAt = current?.shortWindowStartedAt as Timestamp | undefined;
+  const dailyStartedAt = current?.dailyWindowStartedAt as Timestamp | undefined;
+  const shortExpired = !shortStartedAt || now - shortStartedAt.toMillis() >= SHORT_RATE_WINDOW_MS;
+  const dailyExpired = !dailyStartedAt || now - dailyStartedAt.toMillis() >= DAILY_RATE_WINDOW_MS;
+  const shortCount = Number.isInteger(current?.shortCount) ? current!.shortCount as number : 0;
+  const dailyCount = Number.isInteger(current?.dailyCount) ? current!.dailyCount as number : 0;
+
+  if (!dailyExpired && dailyCount >= 50) throw new RegistrationRateLimitError('daily');
+  if (!shortExpired && shortCount >= 10) throw new RegistrationRateLimitError('short');
+
+  return {
+    shortWindowStartedAt: shortExpired ? serverTimestamp() : shortStartedAt,
+    shortCount: shortExpired ? 1 : shortCount + 1,
+    dailyWindowStartedAt: dailyExpired ? serverTimestamp() : dailyStartedAt,
+    dailyCount: dailyExpired ? 1 : dailyCount + 1,
+    updatedAt: serverTimestamp(),
+    lastOperationBillId: billId,
+    lastOperationSightingId: sightingId,
+  };
+}
 
 function getLocalData(): { bills: Bill[]; sightings: Sighting[] } {
   try {
@@ -83,19 +124,18 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
   if (isFirebaseConfigured && db) {
     const endTotal = startTiming(`getBillBySerial(${normSerial})`);
     try {
-      const billsRef = collection(db, 'bills');
-      const q = query(billsRef, where('serialNumber', '==', normSerial));
-      const endQ1 = startTiming(`getBillBySerial: getDocs(bills)`);
-      const snap = await getDocs(q);
+      const billRef = doc(db, 'bills', normSerial);
+      if (isDebugTiming()) console.debug('[Bill Lookup Debug] target document ID=', billRef.id);
+      const endQ1 = startTiming(`getBillBySerial: getDoc(bills/${billRef.id})`);
+      const snap = await getDoc(billRef);
       endQ1();
 
-      if (snap.empty) {
+      if (!snap.exists()) {
         endTotal();
         return null;
       }
 
-      const billDoc = snap.docs[0];
-      const bill = { id: billDoc.id, ...billDoc.data() } as Bill;
+      const bill = { id: snap.id, ...snap.data() } as Bill;
 
       // 発見記録を取得
       const sightingsRef = collection(db, 'sightings');
@@ -170,8 +210,11 @@ export async function registerBillSighting(
   if (isFirebaseConfigured && db) {
     const endTotal = startTiming(`registerBillSighting(${normSerial})`);
     // Firebase設定時はFirestoreで実行し、エラー時は隠さずそのままthrowする
+    const uid = auth?.currentUser?.uid;
+    if (!uid) throw new Error('登録に必要な端末認証を準備できませんでした。ページを再読み込みしてお試しください。');
     const billId = normSerial; // 一意なキーとして正規化記番号を活用
     const billRef = doc(db, 'bills', billId);
+    const rateLimitRef = doc(db, 'rateLimits', uid);
     const sightingsColRef = collection(db, 'sightings');
 
     let endTx: ((err?: unknown) => number) | null = null;
@@ -179,8 +222,12 @@ export async function registerBillSighting(
       endTx = startTiming(`registerBillSighting: runTransaction`);
       const txResult = await runTransaction(db, async (txn) => {
         const endGet = startTiming(`registerBillSighting: txn.get(bill)`);
-        const billSnap = await txn.get(billRef);
+        const [billSnap, rateLimitSnap] = await Promise.all([
+          txn.get(billRef),
+          txn.get(rateLimitRef),
+        ]);
         endGet();
+        const currentRateLimit = rateLimitSnap.exists() ? rateLimitSnap.data() : null;
 
         if (billSnap.exists()) {
           // 既に登録されている紙幣（再発見！）
@@ -248,6 +295,7 @@ export async function registerBillSighting(
         };
 
         txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
+        txn.set(rateLimitRef, nextRateLimitData(currentRateLimit, billId, sightingDocRef.id));
 
         const finalBill: Bill = {
           ...currentBill,
@@ -313,6 +361,7 @@ export async function registerBillSighting(
         };
 
         txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
+        txn.set(rateLimitRef, nextRateLimitData(currentRateLimit, billId, sightingDocRef.id));
 
         return {
           isRediscovery: false,

@@ -228,16 +228,15 @@ npm run deploy
 
 `firebase.json` は移行用の互換Rules（`firestore.rules`）を指しています。`firestore.strict.rules` は旧クライアント互換分岐を含まない最終版で、`firebase.strict.json` から個別にデプロイできます。
 
-1. **Phase 1 — 互換RulesのみFirebaseへdeploy**
+1. **Phase 1 — 移行用compat Rulesをdeploy**
    - `firebase deploy --only firestore:rules --project <Firebase project ID>`
-   - 旧クライアント形式（`lastSightedAtServer`なし）と新クライアント形式の両方を許容します。旧クライアント経路では15分制限を完全には保証できません。
-2. **Phase 2 — 新frontendをCloudflareへdeploy**
-   - `npm run deploy`
-3. **Phase 3 — iPhone / Android / Macで確認**
-   - 新規登録、再発見、同じ紙幣の15分制限、別の紙幣の連続登録を確認します。
-4. **Phase 4 — 移行期間終了後strict Rulesへ切り替え**
-   - 旧クライアントの利用がなくなり、新frontendの匿名AuthをiPhone / Android / Macで確認してから、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
-   - strict版ではbill/sighting書き込みにAuthを要求し、時計フィールドのないbillを旧形式のまま再発見させません。既存billは新frontendによる時計初期化後、15分待って再発見できます。
+   - `firestore.rules` は旧frontendのbill/sighting writeを維持しつつ、新frontendのbill + sighting + `rateLimits/{uid}` transactionを許可します。旧client形式（`lastSightedAtServer`なし）も互換のため許容します。
+2. **Phase 2 — 新frontendをdeployして実機確認**
+   - Cloudflareへ新frontendをdeployし、iPhone / Android / Macで新規登録、再発見、同一billの15分制限、rate-limit countの更新、同じUIDからの上限後の拒否を確認します。
+3. **Phase 3 — strict Rulesへ切り替え**
+   - 旧frontendの利用がなくなった後、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
+   - `firestore.strict.rules`はbill/sighting writeにAuthとrate-limit更新を必須とし、旧未認証writeとrate-limitを伴わないwriteを終了します。
+   - compat期間は互換のため旧client writeを止められず、UID rate limitを迂回できます。移行用Rulesを恒久運用せず、実機確認後に必ずPhase 3へ進んでください。
 
 ### 匿名Authと「この端末で登録したお札」
 
@@ -256,7 +255,9 @@ MVPでは通知ではなく、「この端末で登録したお札」を再訪�
 
 #### UID単位rate limit
 
-今回のRules + transactionだけのUID rate limitは実装せず、設計課題として残します。Firestore Rulesの `getAfter()` はtransaction/batch後の状態を見て関連writeを同時に要求でき、request.timeを使ったwindow start/countの検証も設計上は可能です。ただし公開write互換期間には未認証の旧client用経路が残り、そこからUIDカウンターを通らず投稿できるため、段階導入中に完全強制できません。将来実装する場合は認証済みclientのbill/sighting transactionに `rateLimits/{uid}` 更新を含め、Rulesで同じrequest.timeと回数上限を検証する案を、Rulesのdocument access call上限と実機transactionを含めて先にテストします。目安は10分に10件または1日に50件です。匿名アカウントを作り直せばUID単位制限は回避できるため、完全な荒らし防止にはなりません。App Check + Anonymous Auth + rate limitの多層防御として扱います。
+strict Rulesでは、匿名Auth UIDごとに10分あたり10操作、24時間あたり50操作を制限します。`rateLimits/{uid}`にwindow start、count、updatedAtを保存し、登録・再発見のtransactionでbill、sightingと一緒に更新します。Rulesは`request.time`でcountと期間遷移を検証し、`getAfter()`で同じrate-limit更新がbill/sightingの両方と同一transactionに含まれることを確認します。rate-limit文書のoperation bill/sighting IDも照合するため、1つのcount増加で複数billをまとめて書き込むことはできません。cooldown clockの初期化だけの更新は登録操作ではないためrateを消費しません。
+
+この制限は匿名UID単位です。匿名アカウントを作り直せば回避できるため完全な荒らし防止ではなく、App Check + Anonymous Auth + UID rate limitの多層防御として扱います。Strict Rules Emulatorの確認は`npm run test:rules:strict`で実行できます。
 
 #### 将来の再発見通知
 

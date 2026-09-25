@@ -55,6 +55,12 @@ body {
   overflow-x: hidden;
 }
 
+/* iOS Safari's 100vh may include space behind the collapsing browser chrome.
+   Keep the page at least as tall as the smallest visible viewport instead. */
+@supports (min-height: 100svh) {
+  body { min-height: 100svh; }
+}
+
 /* アプリ全体の最大幅（スマホ〜タブレットに最適化） */
 .app-container {
   max-width: 480px;
@@ -65,6 +71,10 @@ body {
   flex-direction: column;
   position: relative;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.06);
+}
+
+@supports (min-height: 100svh) {
+  .app-container { min-height: 100svh; }
 }
 
 /* ヘッダー */

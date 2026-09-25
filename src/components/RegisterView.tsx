@@ -27,7 +27,12 @@ import {
   validateSerialNumber,
   formatSerialDisplay,
 } from '../utils/serial';
-import { registerBillSighting, getBillBySerial, initializeLegacyBillCooldown } from '../services/billService';
+import {
+  registerBillSighting,
+  getBillBySerial,
+  initializeLegacyBillCooldown,
+  RegistrationRateLimitError,
+} from '../services/billService';
 import { trackFirstRegisteredBill } from '../services/trackedBills';
 
 const BILL_COOLDOWN_MS = 15 * 60 * 1000;
@@ -371,6 +376,12 @@ export const RegisterView = ({
       onSuccess(result, trackingFailed);
     } catch (err: any) {
       console.error('Registration failed:', err);
+      if (err instanceof RegistrationRateLimitError) {
+        setErrorMessage(err.window === 'daily'
+          ? '本日の登録回数が上限に達しました。時間をおいてからもう一度お試しください。'
+          : '短時間に多くの登録が行われました。しばらく待ってからもう一度お試しください。');
+        return;
+      }
       const rawMsg = err?.message || '';
       const isInternalFirebaseError =
         rawMsg.includes('Missing or insufficient') ||

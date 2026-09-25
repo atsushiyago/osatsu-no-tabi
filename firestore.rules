@@ -192,6 +192,88 @@ service cloud.firestore {
       );
     }
 
+    // Temporary rollout compatibility: old clients may keep writing public bill/sighting
+    // documents without a rate-limit document. New clients can update their own counter
+    // in the same transaction; when they do, that private write is validated as strictly
+    // as in firestore.strict.rules. Strict Rules remain the final enforcement stage.
+    function hasRateLimitFields(data) {
+      return data.keys().hasAll([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && data.keys().hasOnly([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && data.shortWindowStartedAt is timestamp
+        && data.shortCount is int && data.shortCount >= 1 && data.shortCount <= 10
+        && data.dailyWindowStartedAt is timestamp
+        && data.dailyCount is int && data.dailyCount >= 1 && data.dailyCount <= 50
+        && data.updatedAt is timestamp && data.updatedAt == request.time
+        && data.lastOperationBillId is string
+        && data.lastOperationBillId.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && data.lastOperationSightingId is string
+        && data.lastOperationSightingId.size() >= 1
+        && data.lastOperationSightingId.size() <= 150;
+    }
+
+    function isInitialRateLimit(data) {
+      return hasRateLimitFields(data)
+        && data.shortWindowStartedAt == request.time
+        && data.shortCount == 1
+        && data.dailyWindowStartedAt == request.time
+        && data.dailyCount == 1;
+    }
+
+    function isValidRateLimitAdvance(before, after) {
+      return hasRateLimitFields(after)
+        && before.shortWindowStartedAt is timestamp
+        && before.shortCount is int && before.shortCount >= 1 && before.shortCount <= 10
+        && before.dailyWindowStartedAt is timestamp
+        && before.dailyCount is int && before.dailyCount >= 1 && before.dailyCount <= 50
+        && after.diff(before).affectedKeys().hasOnly([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && (request.time < before.shortWindowStartedAt + duration.value(10, 'm')
+          ? (after.shortWindowStartedAt == before.shortWindowStartedAt
+            && after.shortCount == before.shortCount + 1)
+          : (after.shortWindowStartedAt == request.time && after.shortCount == 1))
+        && (request.time < before.dailyWindowStartedAt + duration.value(24, 'h')
+          ? (after.dailyWindowStartedAt == before.dailyWindowStartedAt
+            && after.dailyCount == before.dailyCount + 1)
+          : (after.dailyWindowStartedAt == request.time && after.dailyCount == 1));
+    }
+
+    function hasValidRateLimitOperationPair(data) {
+      let billPath = /databases/$(database)/documents/bills/$(data.lastOperationBillId);
+      let sightingPath = /databases/$(database)/documents/sightings/$(data.lastOperationSightingId);
+      let billAfter = getAfter(billPath).data;
+      let sightingAfter = getAfter(sightingPath).data;
+      return existsAfter(billPath)
+        && existsAfter(sightingPath)
+        && !exists(sightingPath)
+        && billAfter.id == data.lastOperationBillId
+        && sightingAfter.id == data.lastOperationSightingId
+        && sightingAfter.billId == data.lastOperationBillId
+        && ((!exists(billPath) && billAfter.sightingsCount == 1)
+          || (exists(billPath)
+            && billAfter.sightingsCount == get(billPath).data.sightingsCount + 1));
+    }
+
+    match /rateLimits/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && isInitialRateLimit(request.resource.data)
+        && hasValidRateLimitOperationPair(request.resource.data);
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && isValidRateLimitAdvance(resource.data, request.resource.data)
+        && hasValidRateLimitOperationPair(request.resource.data);
+      allow delete: if false;
+    }
+
     // Private per-browser/device state. Public bills and sightings never store a UID.
     match /users/{uid}/trackedBills/{billId} {
       allow read: if request.auth != null && request.auth.uid == uid;
