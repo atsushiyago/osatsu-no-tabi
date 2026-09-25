@@ -498,17 +498,19 @@ export const RegisterView = ({
             ※全角・半角・小文字は自動変換されます。ハイフンやスペースは不要です。
           </p>
 
-          {/* カメラOCR読み取り入力（非表示） */}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
-            disabled={isOcrProcessing}
-            id="ocr-file-input"
-          />
+          {isTimingDebug && (
+            <>
+              {/* OCRはdebug URLからのみ利用可能 */}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+                disabled={isOcrProcessing}
+                id="ocr-file-input"
+              />
 
           {/* カメラで記番号を読むボタン & ガイド */}
           <div style={{ marginTop: '10px' }}>
@@ -665,7 +667,9 @@ export const RegisterView = ({
                 )}
               </div>
             )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
         {isTimingDebug && ocrDebugData && <OcrDebugPanel data={ocrDebugData} />}
