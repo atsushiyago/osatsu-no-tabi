@@ -8,6 +8,7 @@ import { CelebrationModal } from './components/CelebrationModal';
 import type { RegisterResult } from './types';
 import { normalizeSerialNumber } from './utils/serial';
 import { isFirebaseConfigured } from './services/firebase';
+import { TimingMonitor } from './components/TimingMonitor';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill';
 
@@ -197,6 +198,7 @@ export function App() {
           <span>検索</span>
         </button>
       </nav>
+      <TimingMonitor />
     </div>
   );
 }

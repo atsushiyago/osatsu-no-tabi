@@ -19,6 +19,7 @@ import type {
 } from '../types';
 import { calculateDistanceKm } from '../utils/geo';
 import { normalizeSerialNumber } from '../utils/serial';
+import { startTiming } from '../utils/timing';
 
 /**
  * Firestore書き込み用データから undefined のフィールドを除外するヘルパー
@@ -210,35 +211,47 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
   if (!normSerial) return null;
 
   if (isFirebaseConfigured && db) {
-    const billsRef = collection(db, 'bills');
-    const q = query(billsRef, where('serialNumber', '==', normSerial));
-    const snap = await getDocs(q);
+    const endTotal = startTiming(`getBillBySerial(${normSerial})`);
+    try {
+      const billsRef = collection(db, 'bills');
+      const q = query(billsRef, where('serialNumber', '==', normSerial));
+      const endQ1 = startTiming(`getBillBySerial: getDocs(bills)`);
+      const snap = await getDocs(q);
+      endQ1();
 
-    if (snap.empty) {
-      return null;
+      if (snap.empty) {
+        endTotal();
+        return null;
+      }
+
+      const billDoc = snap.docs[0];
+      const bill = { id: billDoc.id, ...billDoc.data() } as Bill;
+
+      // 発見記録を取得
+      const sightingsRef = collection(db, 'sightings');
+      const sq = query(
+        sightingsRef,
+        where('billId', '==', bill.id)
+      );
+      const endQ2 = startTiming(`getBillBySerial: getDocs(sightings)`);
+      const sSnap = await getDocs(sq);
+      endQ2();
+      const sightings = sSnap.docs
+        .map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        } as Sighting))
+        .sort((a, b) => a.step - b.step);
+
+      endTotal();
+      return {
+        ...bill,
+        sightings,
+      };
+    } catch (err) {
+      endTotal(err);
+      throw err;
     }
-
-    const billDoc = snap.docs[0];
-    const bill = { id: billDoc.id, ...billDoc.data() } as Bill;
-
-    // 発見記録を取得
-    const sightingsRef = collection(db, 'sightings');
-    const sq = query(
-      sightingsRef,
-      where('billId', '==', bill.id)
-    );
-    const sSnap = await getDocs(sq);
-    const sightings = sSnap.docs
-      .map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      } as Sighting))
-      .sort((a, b) => a.step - b.step);
-
-    return {
-      ...bill,
-      sightings,
-    };
   }
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
@@ -272,31 +285,39 @@ export async function registerBillSighting(
   const trimmedNote = input.userNote?.trim();
 
   if (isFirebaseConfigured && db) {
+    const endTotal = startTiming(`registerBillSighting(${normSerial})`);
     // Firebase設定時はFirestoreで実行し、エラー時は隠さずそのままthrowする
     const billId = normSerial; // 一意なキーとして正規化記番号を活用
     const billRef = doc(db, 'bills', billId);
     const sightingsColRef = collection(db, 'sightings');
 
-    const txResult = await runTransaction(db, async (txn) => {
-      const billSnap = await txn.get(billRef);
+    let endTx: ((err?: unknown) => number) | null = null;
+    try {
+      endTx = startTiming(`registerBillSighting: runTransaction`);
+      const txResult = await runTransaction(db, async (txn) => {
+        const endGet = startTiming(`registerBillSighting: txn.get(bill)`);
+        const billSnap = await txn.get(billRef);
+        endGet();
 
-      if (billSnap.exists()) {
-        // 既に登録されている紙幣（再発見！）
-        const currentBill = billSnap.data() as Bill;
+        if (billSnap.exists()) {
+          // 既に登録されている紙幣（再発見！）
+          const currentBill = billSnap.data() as Bill;
 
-        // 額面不整合チェック: 既存の額面と異なる場合はエラー
-        if (input.denomination && input.denomination !== currentBill.denomination) {
-          throw new Error(
-            `このお札（記番号: ${normSerial}）は既に ${currentBill.denomination.toLocaleString()}円札 として登録されています。額面を変更することはできません。`
+          // 額面不整合チェック: 既存の額面と異なる場合はエラー
+          if (input.denomination && input.denomination !== currentBill.denomination) {
+            throw new Error(
+              `このお札（記番号: ${normSerial}）は既に ${currentBill.denomination.toLocaleString()}円札 として登録されています。額面を変更することはできません。`
+            );
+          }
+
+          // 直前の発見を取得
+          const sq = query(
+            sightingsColRef,
+            where('billId', '==', billId)
           );
-        }
-
-        // 直前の発見を取得
-        const sq = query(
-          sightingsColRef,
-          where('billId', '==', billId)
-        );
-        const sSnap = await getDocs(sq);
+          const endSight = startTiming(`registerBillSighting: getDocs(existing sightings)`);
+          const sSnap = await getDocs(sq);
+          endSight();
         const existingSightings = sSnap.docs
           .map((d) => ({
             id: d.id,
@@ -417,8 +438,15 @@ export async function registerBillSighting(
       }
     });
 
+    endTx?.();
+    endTotal();
     return txResult;
+  } catch (err) {
+    endTx?.(err);
+    endTotal(err);
+    throw err;
   }
+}
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
   if (import.meta.env.PROD) {
@@ -551,43 +579,52 @@ export async function registerBillSighting(
  */
 export async function getGlobalStats(): Promise<GlobalStats> {
   if (isFirebaseConfigured && db) {
-    const billsRef = collection(db, 'bills');
-    const snap = await getDocs(billsRef);
+    const endTotal = startTiming('getGlobalStats');
+    try {
+      const billsRef = collection(db, 'bills');
+      const endDocs = startTiming('getGlobalStats: getDocs(bills)');
+      const snap = await getDocs(billsRef);
+      endDocs();
 
-    const totalBills = snap.size;
-    let totalSightings = 0;
-    let rediscoveredBills = 0;
-    let maxDistanceKm = 0;
-    let longestJourneyDays = 0;
+      const totalBills = snap.size;
+      let totalSightings = 0;
+      let rediscoveredBills = 0;
+      let maxDistanceKm = 0;
+      let longestJourneyDays = 0;
 
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as Bill;
-      const count = data.sightingsCount || 1;
-      totalSightings += count;
-      if (count >= 2) {
-        rediscoveredBills += 1;
-      }
-      if ((data.totalDistanceKm || 0) > maxDistanceKm) {
-        maxDistanceKm = data.totalDistanceKm;
-      }
-      if (data.firstSightedAt && data.lastSightedAt) {
-        const days = Math.round(
-          (new Date(data.lastSightedAt).getTime() - new Date(data.firstSightedAt).getTime()) /
-            (1000 * 60 * 60 * 24)
-        );
-        if (days > longestJourneyDays) {
-          longestJourneyDays = days;
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Bill;
+        const count = data.sightingsCount || 1;
+        totalSightings += count;
+        if (count >= 2) {
+          rediscoveredBills += 1;
         }
-      }
-    });
+        if ((data.totalDistanceKm || 0) > maxDistanceKm) {
+          maxDistanceKm = data.totalDistanceKm;
+        }
+        if (data.firstSightedAt && data.lastSightedAt) {
+          const days = Math.round(
+            (new Date(data.lastSightedAt).getTime() - new Date(data.firstSightedAt).getTime()) /
+              (1000 * 60 * 60 * 24)
+          );
+          if (days > longestJourneyDays) {
+            longestJourneyDays = days;
+          }
+        }
+      });
 
-    return {
-      totalBills,
-      totalSightings,
-      rediscoveredBills,
-      maxDistanceKm,
-      longestJourneyDays,
-    };
+      endTotal();
+      return {
+        totalBills,
+        totalSightings,
+        rediscoveredBills,
+        maxDistanceKm,
+        longestJourneyDays,
+      };
+    } catch (err) {
+      endTotal(err);
+      throw err;
+    }
   }
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
@@ -636,33 +673,44 @@ export async function getGlobalStats(): Promise<GlobalStats> {
  */
 export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightings[]> {
   if (isFirebaseConfigured && db) {
-    const billsRef = collection(db, 'bills');
-    const q = query(billsRef, orderBy('updatedAt', 'desc'), limit(limitCount));
-    const snap = await getDocs(q);
+    const endTotal = startTiming(`getRecentJourneys(${limitCount})`);
+    try {
+      const billsRef = collection(db, 'bills');
+      const q = query(billsRef, orderBy('updatedAt', 'desc'), limit(limitCount));
+      const endBills = startTiming('getRecentJourneys: getDocs(bills)');
+      const snap = await getDocs(q);
+      endBills();
 
-    const journeys: BillWithSightings[] = [];
-    for (const docSnap of snap.docs) {
-      const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
-      const sightingsRef = collection(db, 'sightings');
-      const sq = query(
-        sightingsRef,
-        where('billId', '==', bill.id)
-      );
-      const sSnap = await getDocs(sq);
-      const sightings = sSnap.docs
-        .map((sDoc) => ({
-          id: sDoc.id,
-          ...sDoc.data(),
-        } as Sighting))
-        .sort((a, b) => a.step - b.step);
+      const journeys: BillWithSightings[] = [];
+      const endSightings = startTiming(`getRecentJourneys: getDocs(sightings x${snap.docs.length})`);
+      for (const docSnap of snap.docs) {
+        const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
+        const sightingsRef = collection(db, 'sightings');
+        const sq = query(
+          sightingsRef,
+          where('billId', '==', bill.id)
+        );
+        const sSnap = await getDocs(sq);
+        const sightings = sSnap.docs
+          .map((sDoc) => ({
+            id: sDoc.id,
+            ...sDoc.data(),
+          } as Sighting))
+          .sort((a, b) => a.step - b.step);
 
-      journeys.push({
-        ...bill,
-        sightings,
-      });
+        journeys.push({
+          ...bill,
+          sightings,
+        });
+      }
+      endSightings();
+      endTotal();
+
+      return journeys;
+    } catch (err) {
+      endTotal(err);
+      throw err;
     }
-
-    return journeys;
   }
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
