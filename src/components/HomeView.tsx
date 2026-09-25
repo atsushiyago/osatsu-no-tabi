@@ -15,6 +15,7 @@ import { formatSerialDisplay } from '../utils/serial';
 import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
 import type { TrackedBillRow } from '../services/trackedBills';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
+import { getLatestPublicSightingRoute } from '../utils/journeyRoute';
 
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
@@ -42,7 +43,7 @@ export const HomeView = ({
       ];
   const newTrackedBills = trackedBills ? getUnseenTrackedBills(trackedBills) : [];
   const leadingNewBill = newTrackedBills[0];
-  const latestNewSighting = leadingNewBill?.bill.sightings.at(-1);
+  const latestPublicSightingRoute = getLatestPublicSightingRoute(leadingNewBill?.bill.sightings);
 
   useEffect(() => {
     async function loadData() {
@@ -78,17 +79,16 @@ export const HomeView = ({
           <span className="rediscovery-stamp" aria-label="再発見の記録">
             <span>再発見</span>
           </span>
-          {leadingNewBill?.lastSeenMunicipality && latestNewSighting?.municipality &&
-            leadingNewBill.lastSeenMunicipality !== latestNewSighting.municipality && (
-              <div
-                className="travel-route home-new-discovery-route"
-                aria-label={`前回確認 ${leadingNewBill.lastSeenMunicipality} から現在 ${latestNewSighting.municipality} へ`}
-              >
-                <span>{leadingNewBill.lastSeenMunicipality}</span>
-                <span className="travel-route-dots" aria-hidden="true">··· →</span>
-                <span>{latestNewSighting.municipality}</span>
-              </div>
-            )}
+          {latestPublicSightingRoute && (
+            <div
+              className="travel-route home-new-discovery-route"
+              aria-label={`直近の移動 ${latestPublicSightingRoute.from} から ${latestPublicSightingRoute.to} へ`}
+            >
+              <span>{latestPublicSightingRoute.from}</span>
+              <span className="travel-route-dots" aria-hidden="true">··· →</span>
+              <span>{latestPublicSightingRoute.to}</span>
+            </div>
+          )}
           <button className="home-new-discovery-link" onClick={onNavigateTrackedBills}>
             <span>この端末のお札を見る</span>
             <ArrowRight size={18} aria-hidden="true" />

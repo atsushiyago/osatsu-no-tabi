@@ -6,6 +6,7 @@ import {
   resolveLastSeenBaseline,
   sortTrackedBillRows,
 } from '../src/utils/trackedBillState.js';
+import { getLatestPublicSightingRoute } from '../src/utils/journeyRoute.ts';
 
 test('tracked bill has no new sighting when count is unchanged', () => {
   assert.equal(getUnseenSightingsCount(4, 4), 0);
@@ -51,4 +52,31 @@ test('newly discovered bills sort first, then by updatedAt', () => {
     { id: 'new-recent', bill: { updatedAt: '2026-02-01T00:00:00Z' }, unseenSightingsCount: 3 },
   ];
   assert.deepEqual(sortTrackedBillRows(rows).map((row) => row.id), ['new-recent', 'old-new', 'seen-recent']);
+});
+
+test('Home route uses the latest two public sightings, independent of each UID baseline', () => {
+  const publicSightings = [
+    { municipality: '札幌市' },
+    { municipality: '大分市' },
+  ];
+  const iphoneTrackedBill = { lastSeenMunicipality: '札幌市', bill: { sightings: publicSightings } };
+  const androidTrackedBill = { lastSeenMunicipality: null, bill: { sightings: publicSightings } };
+
+  assert.deepEqual(
+    getLatestPublicSightingRoute(iphoneTrackedBill.bill.sightings),
+    getLatestPublicSightingRoute(androidTrackedBill.bill.sightings),
+  );
+  assert.deepEqual(getLatestPublicSightingRoute(publicSightings), { from: '札幌市', to: '大分市' });
+});
+
+test('Home route is omitted when there is only one sighting or the latest municipalities match', () => {
+  assert.equal(getLatestPublicSightingRoute([{ municipality: '札幌市' }]), null);
+  assert.equal(getLatestPublicSightingRoute([
+    { municipality: '大分市' },
+    { municipality: '大分市' },
+  ]), null);
+  assert.equal(getLatestPublicSightingRoute([
+    { municipality: '札幌市' },
+    {},
+  ]), null);
 });
