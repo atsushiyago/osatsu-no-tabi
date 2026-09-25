@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "preview:cf": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "test:rules": "firebase emulators:exec --only firestore \"node test/rules.test.js\""
+    "test:rules": "firebase emulators:exec --only firestore \"node test/runner.cjs\""
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

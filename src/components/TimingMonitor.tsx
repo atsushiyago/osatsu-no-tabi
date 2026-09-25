@@ -3,14 +3,21 @@ import { subscribeTiming, clearTimingLogs, type TimingEntry } from '../utils/tim
 import { Activity, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 
 export const TimingMonitor = () => {
+  const isVisible =
+    import.meta.env.DEV ||
+    (typeof window !== 'undefined' && window.location.search.includes('debug=timing'));
+
   const [entries, setEntries] = useState<TimingEntry[]>([]);
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
+    if (!isVisible) return;
     return subscribeTiming((newEntries) => {
       setEntries(newEntries);
     });
-  }, []);
+  }, [isVisible]);
+
+  if (!isVisible) return null;
 
   const latestCompleted = entries.find((e) => e.durationMs !== undefined);
   const latestPending = entries.find((e) => e.durationMs === undefined);

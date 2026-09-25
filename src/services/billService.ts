@@ -7,6 +7,10 @@ import {
   orderBy,
   limit,
   runTransaction,
+  getAggregateFromServer,
+  getCountFromServer,
+  count,
+  sum,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
 import type {
@@ -582,36 +586,29 @@ export async function getGlobalStats(): Promise<GlobalStats> {
     const endTotal = startTiming('getGlobalStats');
     try {
       const billsRef = collection(db, 'bills');
-      const endDocs = startTiming('getGlobalStats: getDocs(bills)');
-      const snap = await getDocs(billsRef);
-      endDocs();
+      const endParallel = startTiming('getGlobalStats: parallel (agg + rediscount + maxDist)');
 
-      const totalBills = snap.size;
-      let totalSightings = 0;
-      let rediscoveredBills = 0;
+      const [basicAggSnap, redisoveredAggSnap, maxDistSnap] = await Promise.all([
+        getAggregateFromServer(billsRef, {
+          totalBills: count(),
+          totalSightings: sum('sightingsCount'),
+        }),
+        getCountFromServer(query(billsRef, where('sightingsCount', '>', 1))),
+        getDocs(query(billsRef, orderBy('totalDistanceKm', 'desc'), limit(1))),
+      ]);
+
+      endParallel();
+
+      const basicData = basicAggSnap.data();
+      const totalBills = basicData.totalBills ?? 0;
+      const totalSightings = basicData.totalSightings ?? 0;
+      const rediscoveredBills = redisoveredAggSnap.data().count ?? 0;
+
       let maxDistanceKm = 0;
-      let longestJourneyDays = 0;
-
-      snap.forEach((docSnap) => {
-        const data = docSnap.data() as Bill;
-        const count = data.sightingsCount || 1;
-        totalSightings += count;
-        if (count >= 2) {
-          rediscoveredBills += 1;
-        }
-        if ((data.totalDistanceKm || 0) > maxDistanceKm) {
-          maxDistanceKm = data.totalDistanceKm;
-        }
-        if (data.firstSightedAt && data.lastSightedAt) {
-          const days = Math.round(
-            (new Date(data.lastSightedAt).getTime() - new Date(data.firstSightedAt).getTime()) /
-              (1000 * 60 * 60 * 24)
-          );
-          if (days > longestJourneyDays) {
-            longestJourneyDays = days;
-          }
-        }
-      });
+      if (!maxDistSnap.empty) {
+        const topBill = maxDistSnap.docs[0].data() as Bill;
+        maxDistanceKm = topBill.totalDistanceKm || 0;
+      }
 
       endTotal();
       return {
@@ -619,7 +616,7 @@ export async function getGlobalStats(): Promise<GlobalStats> {
         totalSightings,
         rediscoveredBills,
         maxDistanceKm,
-        longestJourneyDays,
+        longestJourneyDays: 0,
       };
     } catch (err) {
       endTotal(err);
@@ -681,28 +678,29 @@ export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightin
       const snap = await getDocs(q);
       endBills();
 
-      const journeys: BillWithSightings[] = [];
-      const endSightings = startTiming(`getRecentJourneys: getDocs(sightings x${snap.docs.length})`);
-      for (const docSnap of snap.docs) {
-        const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
-        const sightingsRef = collection(db, 'sightings');
-        const sq = query(
-          sightingsRef,
-          where('billId', '==', bill.id)
-        );
-        const sSnap = await getDocs(sq);
-        const sightings = sSnap.docs
-          .map((sDoc) => ({
-            id: sDoc.id,
-            ...sDoc.data(),
-          } as Sighting))
-          .sort((a, b) => a.step - b.step);
+      const sightingsRef = collection(db, 'sightings');
+      const endSightings = startTiming(`getRecentJourneys: parallel getDocs(sightings x${snap.docs.length})`);
+      const journeys = await Promise.all(
+        snap.docs.map(async (docSnap) => {
+          const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
+          const sq = query(
+            sightingsRef,
+            where('billId', '==', bill.id)
+          );
+          const sSnap = await getDocs(sq);
+          const sightings = sSnap.docs
+            .map((sDoc) => ({
+              id: sDoc.id,
+              ...sDoc.data(),
+            } as Sighting))
+            .sort((a, b) => a.step - b.step);
 
-        journeys.push({
-          ...bill,
-          sightings,
-        });
-      }
+          return {
+            ...bill,
+            sightings,
+          };
+        })
+      );
       endSightings();
       endTotal();
 
