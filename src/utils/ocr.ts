@@ -375,6 +375,46 @@ export interface PsmImageDiagnostic {
   error?: string;
 }
 
+export interface OcrSerialCandidate {
+  serial: string;
+  isValid: boolean;
+  requiresReview: boolean;
+  confidence: number;
+  sourcePasses: string[];
+}
+
+function serialFormatDistance(value: string): number {
+  const layouts = [
+    { letters: 1, suffix: 1 },
+    { letters: 1, suffix: 2 },
+    { letters: 2, suffix: 1 },
+    { letters: 2, suffix: 2 },
+  ];
+  return Math.min(...layouts.map(({ letters, suffix }) => {
+    if (value.length !== letters + 6 + suffix) return Number.POSITIVE_INFINITY;
+    let mismatches = 0;
+    for (let i = 0; i < value.length; i++) {
+      const expectsLetter = i < letters || i >= letters + 6;
+      if (expectsLetter ? !/[A-Z]/.test(value[i]) : !/[0-9]/.test(value[i])) mismatches++;
+    }
+    return mismatches;
+  }));
+}
+
+function extractReviewCandidates(rawText: string): string[] {
+  const compact = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
+  const candidates = new Set<string>();
+  for (const length of [8, 9, 10]) {
+    for (let start = 0; start <= compact.length - length; start++) {
+      const candidate = compact.slice(start, start + length);
+      if (!validateSerialNumber(candidate).isValid && serialFormatDistance(candidate) <= 2) {
+        candidates.add(candidate);
+      }
+    }
+  }
+  return [...candidates];
+}
+
 async function addWhitePadding(source: Blob): Promise<{ blob: Blob; paddingPx: number }> {
   const img = new Image();
   const sourceUrl = URL.createObjectURL(source);
@@ -563,9 +603,9 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
 }
 
 /**
- * 端末内OCR実行関数（マルチパス & SINGLE_LINE対応）
+ * 端末内OCR実行関数（マルチパス & SINGLE_WORD対応）
  * - dynamic import で tesseract.js を遅延ロード
- * - ページセグメンテーション: SINGLE_LINE (7)
+ * - ページセグメンテーション: SINGLE_WORD
  * - 複数前処理パターンを順次評価し、最も妥当な候補をマージ
  * - ?debug=timing 時の詳細診断ログ出力
  */
@@ -575,7 +615,7 @@ export async function recognizeBanknoteSerialFromImage(
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
   onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void
-): Promise<string[]> {
+): Promise<OcrSerialCandidate[]> {
   const debugTiming = isDebugTiming();
 
   const startTime = debugTiming ? performance.now() : 0;
@@ -611,7 +651,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?.('記番号を認識中...');
 
   let worker: any = null;
-  const allCandidateSerials = new Map<string, { serial: string; maxConfidence: number; sourcePass: string }>();
+  const allCandidateSerials = new Map<string, OcrSerialCandidate & { formatDistance: number }>();
   try {
     try {
       worker = await createWorker('eng', 1, debugTiming ? {
@@ -629,16 +669,86 @@ export async function recognizeBanknoteSerialFromImage(
       throw err;
     }
 
-    // 1行の英数字列として認識 (PSM.SINGLE_LINE = 7)
+    // 記番号を1つの単語として認識。whitelistは適用しない。
     try {
       await worker.setParameters({
-        tessedit_pageseg_mode: '7',
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        tessedit_pageseg_mode: PSM.SINGLE_WORD,
+        tessedit_char_whitelist: '',
       });
     } catch (err) {
       const error = err as Error & { code?: string };
       onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
       throw err;
+    }
+    const contrastPass = passes.find((pass) => pass.name.includes('Contrast'));
+    const otsuPass = passes.find((pass) => pass.name.includes('Otsu'));
+    const normalPasses: PreprocessedPass[] = [
+      { ...(passes[0]), name: 'クロップ直後', blob: imageFileOrBlob },
+      ...(contrastPass ? [contrastPass] : []),
+      ...(otsuPass ? [otsuPass] : []),
+    ];
+
+    for (let i = 0; i < normalPasses.length; i++) {
+      const pass = normalPasses[i];
+      onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
+
+      const passStart = debugTiming ? performance.now() : 0;
+      onRecognizeEvent?.({ type: 'start', pass: pass.name });
+      let ret;
+      try {
+        ret = await worker.recognize(pass.blob);
+      } catch (err) {
+        const error = err as Error & { code?: string };
+        onRecognizeEvent?.({ type: 'error', pass: pass.name, message: error.message, code: error.code });
+        throw err;
+      }
+      const rawText = ret.data.text || '';
+      const confidence = ret.data.confidence ?? 0;
+      const passDuration = debugTiming ? performance.now() - passStart : 0;
+
+      onRecognizeEvent?.({ type: 'end', pass: pass.name });
+
+      // 候補抽出
+      const passCandidates = extractSerialCandidates(rawText, 3);
+      const compactRaw = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
+      const observations = [
+        ...passCandidates.map((serial) => ({ serial, isValid: true })),
+        ...extractReviewCandidates(rawText).map((serial) => ({ serial, isValid: false })),
+      ];
+
+      if (debugTiming) {
+        console.log(
+          `%c[OCR Pass ${i + 1}: ${pass.name}] ` +
+          `Time: ${passDuration.toFixed(0)}ms | Conf: ${confidence.toFixed(1)}% | ` +
+          `Size: ${pass.stats.width}x${pass.stats.height} | ` +
+          `Lum(min/max/avg): ${pass.stats.minLum}/${pass.stats.maxLum}/${pass.stats.avgLum} | ` +
+          `Trans: ${pass.stats.transparentRatio} | ` +
+          `Raw: "${rawText.replace(/[\r\n]+/g, ' ').trim()}" | ` +
+          `Candidates: [${passCandidates.join(', ')}]`,
+          'background: #1e293b; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 2px 4px;'
+        );
+      }
+
+      for (const observation of observations) {
+        const { serial, isValid } = observation;
+        const exactText = compactRaw.includes(serial);
+        const existing = allCandidateSerials.get(serial);
+        if (!existing) {
+          allCandidateSerials.set(serial, {
+            serial,
+            isValid,
+            requiresReview: !isValid || !exactText,
+            confidence,
+            sourcePasses: [pass.name],
+            formatDistance: serialFormatDistance(serial),
+          });
+        } else {
+          existing.isValid ||= isValid;
+          existing.requiresReview &&= !isValid || !exactText;
+          existing.confidence = Math.max(existing.confidence, confidence);
+          if (!existing.sourcePasses.includes(pass.name)) existing.sourcePasses.push(pass.name);
+        }
+      }
     }
 
     if (debugTiming) {
@@ -708,61 +818,12 @@ export async function recognizeBanknoteSerialFromImage(
         }
       }
 
-      // Restore the normal banknote OCR settings before running the existing passes.
+      // Debug比較後も通常OCRと同じパラメータに戻す。
       await worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_LINE,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        tessedit_pageseg_mode: PSM.SINGLE_WORD,
+        tessedit_char_whitelist: '',
       });
     }
-
-    for (let i = 0; i < passes.length; i++) {
-      const pass = passes[i];
-      onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
-
-      const passStart = debugTiming ? performance.now() : 0;
-      onRecognizeEvent?.({ type: 'start', pass: pass.name });
-      let ret;
-      try {
-        ret = await worker.recognize(pass.blob);
-      } catch (err) {
-        const error = err as Error & { code?: string };
-        onRecognizeEvent?.({ type: 'error', pass: pass.name, message: error.message, code: error.code });
-        throw err;
-      }
-      const rawText = ret.data.text || '';
-      const confidence = ret.data.confidence ?? 0;
-      const passDuration = debugTiming ? performance.now() - passStart : 0;
-
-      onRecognizeEvent?.({ type: 'end', pass: pass.name });
-
-      // 候補抽出
-      const passCandidates = extractSerialCandidates(rawText, 3);
-
-      if (debugTiming) {
-        console.log(
-          `%c[OCR Pass ${i + 1}: ${pass.name}] ` +
-          `Time: ${passDuration.toFixed(0)}ms | Conf: ${confidence.toFixed(1)}% | ` +
-          `Size: ${pass.stats.width}x${pass.stats.height} | ` +
-          `Lum(min/max/avg): ${pass.stats.minLum}/${pass.stats.maxLum}/${pass.stats.avgLum} | ` +
-          `Trans: ${pass.stats.transparentRatio} | ` +
-          `Raw: "${rawText.replace(/[\r\n]+/g, ' ').trim()}" | ` +
-          `Candidates: [${passCandidates.join(', ')}]`,
-          'background: #1e293b; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 2px 4px;'
-        );
-      }
-
-      for (const cand of passCandidates) {
-        const existing = allCandidateSerials.get(cand);
-        if (!existing || confidence > existing.maxConfidence) {
-          allCandidateSerials.set(cand, {
-            serial: cand,
-            maxConfidence: confidence,
-            sourcePass: pass.name,
-          });
-        }
-      }
-    }
-
     if (debugTiming) {
       console.log(
         `%c[Timing Monitor] Total OCR Load: ${loadTime.toFixed(0)}ms | Total Time: ${(performance.now() - startTime).toFixed(0)}ms | Unique Candidates: ${allCandidateSerials.size}`,
@@ -770,12 +831,14 @@ export async function recognizeBanknoteSerialFromImage(
       );
     }
 
-    // 信頼度が高い順に並べ替え
-    const sorted = Array.from(allCandidateSerials.values()).sort(
-      (a, b) => b.maxConfidence - a.maxConfidence
+    const sorted = Array.from(allCandidateSerials.values()).sort((a, b) =>
+      Number(a.requiresReview) - Number(b.requiresReview) ||
+      a.formatDistance - b.formatDistance ||
+      b.confidence - a.confidence ||
+      b.serial.length - a.serial.length
     );
 
-    return sorted.slice(0, 3).map((item) => item.serial);
+    return sorted.slice(0, 3).map(({ formatDistance: _formatDistance, ...candidate }) => candidate);
   } finally {
     if (worker) {
       await worker.terminate();

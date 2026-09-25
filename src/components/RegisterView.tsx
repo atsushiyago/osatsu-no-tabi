@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
-import { recognizeBanknoteSerialFromImage, analyzeBlobStats } from '../utils/ocr.ts';
+import { recognizeBanknoteSerialFromImage, analyzeBlobStats, type OcrSerialCandidate } from '../utils/ocr.ts';
 import { CropModal, type CropMetadata } from './CropModal';
 import { OcrDebugPanel, type OcrDebugData } from './OcrDebugPanel';
 import { isDebugTiming } from '../utils/debug';
@@ -62,7 +62,7 @@ export const RegisterView = ({
   const rawFileRef = useRef<File | null>(null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrStatusMessage, setOcrStatusMessage] = useState<string | null>(null);
-  const [ocrCandidates, setOcrCandidates] = useState<string[]>([]);
+  const [ocrCandidates, setOcrCandidates] = useState<OcrSerialCandidate[]>([]);
   const [ocrMessage, setOcrMessage] = useState<{
     type: 'success' | 'warn' | 'info';
     text: string;
@@ -158,19 +158,11 @@ export const RegisterView = ({
         }
       );
 
-      if (candidates.length === 1) {
-        setSerialInput(candidates[0]);
-        setOcrCandidates(candidates);
-        setOcrMessage({
-          type: 'success',
-          text: `候補「${formatSerialDisplay(candidates[0])}」を入力しました。記番号を確認してください。`,
-        });
-      } else if (candidates.length > 1) {
-        setSerialInput(candidates[0]);
+      if (candidates.length > 0) {
         setOcrCandidates(candidates);
         setOcrMessage({
           type: 'info',
-          text: `複数の候補が見つかりました（${candidates.length}件）。該当する記番号を選択または手修正してください。`,
+          text: `${candidates.length}件の読み取り候補があります。紙幣と照合し、必要に応じて入力欄で修正してください。`,
         });
       } else {
         setOcrCandidates([]);
@@ -550,7 +542,7 @@ export const RegisterView = ({
               ) : (
                 <>
                   <Camera size={16} color="#475569" />
-                  <span>カメラで記番号を読む</span>
+                  <span>カメラで記番号を読む（β）</span>
                 </>
               )}
             </button>
@@ -564,6 +556,9 @@ export const RegisterView = ({
               }}
             >
               📷 撮影後、記番号だけが大きく入るように囲んでください（画像は端末内でのみ処理されます）
+            </div>
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', textAlign: 'center' }}>
+              読み取り結果は必ず紙幣の記番号と照合してください
             </div>
 
             {/* OCR結果・候補表示 */}
@@ -609,19 +604,19 @@ export const RegisterView = ({
                   <span style={{ fontWeight: 600 }}>{ocrMessage.text}</span>
                 </div>
 
-                {/* 複数候補が存在する場合の選択チップ */}
-                {ocrCandidates.length > 1 && (
+                {/* 候補はユーザーが選んだ場合のみ入力欄へ反映 */}
+                {ocrCandidates.length > 0 && (
                   <div style={{ marginTop: '4px' }}>
                     <div style={{ fontSize: '11px', marginBottom: '4px', opacity: 0.85 }}>
-                      候補一覧（タップで入力欄に反映）:
+                      タップすると入力欄へ反映します。紙幣と照合して修正してください。
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {ocrCandidates.map((cand) => (
+                      {ocrCandidates.map((candidate) => (
                         <button
                           type="button"
-                          key={cand}
+                          key={candidate.serial}
                           onClick={() => {
-                            setSerialInput(cand);
+                            setSerialInput(candidate.serial);
                           }}
                           style={{
                             padding: '4px 10px',
@@ -629,13 +624,14 @@ export const RegisterView = ({
                             fontSize: '12px',
                             fontWeight: 700,
                             fontFamily: 'monospace',
-                            backgroundColor: serialInput === cand ? '#2563eb' : '#ffffff',
-                            color: serialInput === cand ? '#ffffff' : '#1e293b',
-                            border: `1px solid ${serialInput === cand ? '#2563eb' : '#cbd5e1'}`,
+                            backgroundColor: serialInput === candidate.serial ? '#2563eb' : '#ffffff',
+                            color: serialInput === candidate.serial ? '#ffffff' : '#1e293b',
+                            border: `1px solid ${serialInput === candidate.serial ? '#2563eb' : '#cbd5e1'}`,
                             cursor: 'pointer',
                           }}
                         >
-                          {cand}
+                          <span style={{ display: 'block' }}>{candidate.requiresReview ? '読み取り候補（要確認）' : '読み取り候補'}</span>
+                          <span>{candidate.serial}</span>
                         </button>
                       ))}
                     </div>
