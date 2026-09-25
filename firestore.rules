@@ -198,16 +198,38 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.auth.uid == uid
         && request.resource.data.keys().hasAll(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
-        && request.resource.data.keys().hasOnly(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
+        && request.resource.data.keys().hasOnly(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
         && request.resource.data.billId == billId
         && request.resource.data.createdAt is timestamp
         && request.resource.data.createdAt == request.time
         && request.resource.data.firstRegisteredByMe == true
-        && request.resource.data.notifyOnRediscovery is bool;
+        && request.resource.data.notifyOnRediscovery is bool
+        && (!('lastSeenSightingsCount' in request.resource.data)
+          || (request.resource.data.lastSeenSightingsCount is int && request.resource.data.lastSeenSightingsCount >= 0))
+        && (!('lastSeenAt' in request.resource.data)
+          || (request.resource.data.lastSeenAt is timestamp && request.resource.data.lastSeenAt == request.time))
+        && (!('lastSeenMunicipality' in request.resource.data)
+          || (request.resource.data.lastSeenMunicipality is string
+            && request.resource.data.lastSeenMunicipality.size() >= 1
+            && request.resource.data.lastSeenMunicipality.size() <= 50));
       allow update: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifyOnRediscovery'])
-        && request.resource.data.notifyOnRediscovery is bool;
+        && request.resource.data.keys().hasOnly(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
+        && request.resource.data.billId == resource.data.billId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.firstRegisteredByMe == resource.data.firstRegisteredByMe
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
+        && (!('notifyOnRediscovery' in request.resource.data) || request.resource.data.notifyOnRediscovery is bool)
+        && (!('lastSeenSightingsCount' in request.resource.data)
+          || (request.resource.data.lastSeenSightingsCount is int && request.resource.data.lastSeenSightingsCount >= 0))
+        && (!('lastSeenAt' in request.resource.data)
+          || (request.resource.data.lastSeenAt is timestamp
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastSeenAt'])
+              || request.resource.data.lastSeenAt == request.time)))
+        && (!('lastSeenMunicipality' in request.resource.data)
+          || (request.resource.data.lastSeenMunicipality is string
+            && request.resource.data.lastSeenMunicipality.size() >= 1
+            && request.resource.data.lastSeenMunicipality.size() <= 50));
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
 

@@ -12,6 +12,7 @@ export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
   const [rows, setRows] = useState<TrackedBillRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const newBillCount = rows.filter((row) => row.unseenSightingsCount > 0).length;
 
   useEffect(() => {
     let active = true;
@@ -31,6 +32,11 @@ export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
       <p className="tracked-bills-note">
         ブラウザのデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。
       </p>
+      {!loading && !error && newBillCount > 0 && (
+        <p className="tracked-bills-new-summary" role="status">
+          {newBillCount}枚のお札に新しい発見があります
+        </p>
+      )}
       {loading ? <p role="status">一覧を読み込んでいます…</p> : null}
       {!loading && error ? <p role="alert">一覧を読み込めませんでした。通信環境を確認してください。</p> : null}
       {!loading && !error && rows.length === 0 ? (
@@ -41,8 +47,10 @@ export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
         </div>
       ) : null}
       <div className="tracked-bills-list">
-        {rows.map(({ bill }) => {
+        {rows.map((row) => {
+          const { bill } = row;
           const latestSighting = bill.sightings[bill.sightings.length - 1];
+          const currentMunicipality = latestSighting?.municipality;
           return (
             <button
               className="tracked-bill-card"
@@ -51,8 +59,18 @@ export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
             >
               <span className="tracked-bill-card-main">
                 <strong>{formatSerialDisplay(bill.serialNumber)}</strong>
+                {row.unseenSightingsCount > 0 && (
+                  <span className="tracked-bill-new-badge">
+                    新しい発見あり +{row.unseenSightingsCount}
+                  </span>
+                )}
                 <span>{bill.denomination.toLocaleString()}円札</span>
                 <span>最終発見地域: {latestSighting ? `${latestSighting.prefecture} ${latestSighting.municipality}` : '記録なし'}</span>
+                {row.lastSeenMunicipality && currentMunicipality && row.lastSeenMunicipality !== currentMunicipality && (
+                  <span className="tracked-bill-region-change">
+                    前回確認：{row.lastSeenMunicipality} → 現在：{currentMunicipality}
+                  </span>
+                )}
                 <span>発見回数: {bill.sightingsCount}回</span>
                 <span>最終発見: {new Date(bill.lastSightedAt).toLocaleString('ja-JP')}</span>
               </span>

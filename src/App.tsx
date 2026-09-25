@@ -190,6 +190,7 @@ export function App() {
         {currentView === 'bill' && (
           <BillDetailView
             serialNumber={selectedSerial}
+            userUid={authUid}
             onBack={() => navigateTo('home')}
             onRegisterAgain={(serial) => navigateTo('register', serial)}
           />

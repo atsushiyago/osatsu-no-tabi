@@ -361,7 +361,7 @@ export const RegisterView = ({
       let trackingFailed = false;
       if (!result.isRediscovery && userUid) {
         try {
-          await trackFirstRegisteredBill(userUid, result.bill.id);
+          await trackFirstRegisteredBill(userUid, result.bill, result.newSighting.municipality);
         } catch (trackingError) {
           console.warn('Bill registered publicly but could not be saved to this-device list:', trackingError);
           trackingFailed = true;

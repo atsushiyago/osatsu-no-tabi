@@ -12,6 +12,7 @@
     "deploy": "npm run build && wrangler deploy",
     "test:rules": "firebase emulators:exec --only firestore,auth \"node test/runner.cjs\"",
     "test:auth": "node --test test/anonymous-session.test.js",
+    "test:tracked-bills": "node --test test/tracked-bill-state.test.js",
     "test:appcheck": "node --test test/appcheck.test.js",
     "test:ocr": "node --test test/ocr-parser.test.js"
   },

@@ -12,15 +12,18 @@ import type { BillWithSightings } from '../types';
 import { getBillBySerial } from '../services/billService';
 import { JourneyMap } from './JourneyMap';
 import { formatSerialDisplay } from '../utils/serial';
+import { markTrackedBillSeen } from '../services/trackedBills';
 
 interface BillDetailViewProps {
   serialNumber: string;
+  userUid?: string | null;
   onBack: () => void;
   onRegisterAgain: (serial: string) => void;
 }
 
 export const BillDetailView = ({
   serialNumber,
+  userUid,
   onBack,
   onRegisterAgain,
 }: BillDetailViewProps) => {
@@ -42,6 +45,18 @@ export const BillDetailView = ({
     }
     loadBill();
   }, [serialNumber]);
+
+  useEffect(() => {
+    if (!userUid || loading || !billData) return;
+    const latestSighting = billData.sightings[billData.sightings.length - 1];
+    if (!latestSighting) return;
+    void markTrackedBillSeen(
+      userUid,
+      billData.id,
+      billData.sightingsCount,
+      latestSighting.municipality
+    ).catch((error) => console.warn('Could not mark tracked bill as seen:', error));
+  }, [billData, loading, userUid]);
 
   const handleShare = async () => {
     const url = window.location.href;

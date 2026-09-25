@@ -163,9 +163,24 @@ async function runTests() {
       createdAt: serverTimestamp(),
       firstRegisteredByMe: true,
       notifyOnRediscovery: false,
+      lastSeenSightingsCount: 1,
+      lastSeenAt: serverTimestamp(),
+      lastSeenMunicipality: '新宿区',
     });
     if (!(await getDoc(trackedRef)).exists()) throw new Error('own private tracked bill was not readable');
+    const beforeListRead = (await getDoc(trackedRef)).data();
+    await getDoc(trackedRef); // Opening/reading the list does not itself acknowledge discoveries.
+    const afterListRead = (await getDoc(trackedRef)).data();
+    if (beforeListRead.lastSeenSightingsCount !== afterListRead.lastSeenSightingsCount) {
+      throw new Error('list read changed the seen baseline');
+    }
     await updateDoc(trackedRef, { notifyOnRediscovery: true });
+    // Detail acknowledgement only changes private tracked state.
+    await updateDoc(trackedRef, {
+      lastSeenSightingsCount: 1,
+      lastSeenAt: serverTimestamp(),
+      lastSeenMunicipality: '新宿区',
+    });
     const publicAfter = (await getDoc(billRef)).data();
     if (JSON.stringify(publicBefore) !== JSON.stringify(publicAfter)) {
       throw new Error('private tracking changed public bill data');
@@ -191,6 +206,21 @@ async function runTests() {
         longitudeApprox: 141.3545, createdAt: nowIso, distanceFromPrevKm: 0, daysFromPrev: 0,
       });
     });
+  });
+
+  await assertPass('旧trackedBills形式をread/writeでき、count baselineを追加できる', async () => {
+    const legacyTrackedRef = doc(authenticatedDb, 'users', anonymousUser.uid, 'trackedBills', oldClientBillId);
+    await setDoc(legacyTrackedRef, {
+      billId: oldClientBillId,
+      createdAt: serverTimestamp(),
+      firstRegisteredByMe: true,
+      notifyOnRediscovery: false,
+    });
+    const legacyBefore = (await getDoc(legacyTrackedRef)).data();
+    if ('lastSeenSightingsCount' in legacyBefore) throw new Error('legacy tracked bill unexpectedly had baseline');
+    await updateDoc(legacyTrackedRef, { lastSeenSightingsCount: 1 });
+    const migrated = (await getDoc(legacyTrackedRef)).data();
+    if (migrated.lastSeenSightingsCount !== 1) throw new Error('baseline migration did not persist');
   });
 
   const oldClientSighting2 = doc(collection(db, 'sightings'));

@@ -208,6 +208,28 @@ body {
 .tracked-bill-card > svg { flex: 0 0 auto; color: #587260; }
 .tracked-bill-card-main { display: grid; gap: 4px; min-width: 0; font-size: 13px; line-height: 1.45; }
 .tracked-bill-card-main strong { font-family: monospace; font-size: 18px; letter-spacing: .04em; }
+.tracked-bills-new-summary {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-left: 4px solid #a84536;
+  border-radius: 5px;
+  background: #f2e9d9;
+  color: #294536;
+  font-size: 15px;
+  font-weight: 800;
+}
+.tracked-bill-new-badge {
+  justify-self: start;
+  margin: 2px 0 3px;
+  padding: 4px 8px;
+  border-left: 3px solid #a84536;
+  border-radius: 4px;
+  background: #e8ecdf;
+  color: #294536;
+  font-size: 13px;
+  font-weight: 800;
+}
+.tracked-bill-region-change { color: #74453a; font-weight: 700; }
 .tracked-bills-warning {
   margin: 0 0 14px;
   padding: 10px 12px;

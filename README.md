@@ -243,12 +243,14 @@ npm run deploy
 
 Firebase AuthenticationのAnonymous providerはFirebase Consoleで手動有効化してください。コードは既存Auth userを再利用し、未作成の場合だけ匿名userを作ります。Authが利用できなくても公開検索・閲覧と互換期間中の登録画面は引き続き開けます。「この端末で登録したお札」はAuth UIDがある場合だけ利用できます。
 
-個人用の一覧は `users/{uid}/trackedBills/{billId}` に `billId`, `createdAt`, `firstRegisteredByMe`, `notifyOnRediscovery` を保存します。自分が新しいbillを初回登録したtransactionの成功後にだけ記録し、検索や再発見登録では追加しません。Rulesは本人UIDに限定してread/writeを許可します。公開 `bills` / `sightings` にはUID、email、FCM tokenを保存しません。ブラウザデータ削除や端末変更では現状の一覧を引き継げません。将来は匿名userへGoogle等のcredentialをlinkする形で引き継ぎを検討できます。
+個人用の一覧は `users/{uid}/trackedBills/{billId}` に `billId`, `createdAt`, `firstRegisteredByMe`, `notifyOnRediscovery` と既読状態の `lastSeenSightingsCount`, `lastSeenAt`, `lastSeenMunicipality` を保存します。自分が新しいbillを初回登録したtransactionの成功後にだけ記録し、検索や再発見登録では追加しません。新着は `sightingsCount > lastSeenSightingsCount` で判定します。旧trackedBillsでcountがない場合、一覧の初回読み込み時に現在countをbaselineとして保存し、その場で新着にはしません。既存baselineは一覧を開いただけでは更新せず、詳細を開いて履歴を表示した後にprivate stateだけ既読更新します。Rulesは本人UIDに限定してread/writeを許可し、新fieldsはoptionalなので旧形式も有効です。公開 `bills` / `sightings` にはUID、email、FCM token、既読情報を保存しません。ブラウザデータ削除や端末変更では現状の一覧を引き継げません。将来は匿名userへGoogle等のcredentialをlinkする形で引き継ぎを検討できます。
+
+MVPでは通知ではなく、「この端末で登録したお札」を再訪した際に新しい発見を表示する方式です。Push通知・メール通知・Cloud Functionsは実装していません。
 
 段階展開:
 
-1. Firebase ConsoleでAnonymous providerを有効にし、互換 `firestore.rules` をdeployします。これはprivate `users/{uid}/trackedBills` を本人だけに許可しますが、旧client互換期間の公開bill/sighting writeにはAuthを必須にしません。
-2. 新frontendをdeployします。匿名AuthとtrackedBillsだけを有効にし、public bill/sightingのデータ形式と書き込み互換性は維持します。
+1. Firebase ConsoleでAnonymous providerを有効にし、互換 `firestore.rules` をdeployします。これはprivate `users/{uid}/trackedBills` を本人だけに許可し、新しい既読fieldsもoptionalとして扱います。旧client互換期間の公開bill/sighting writeにはAuthを必須にしません。
+2. 新frontendをdeployします。匿名Auth、trackedBillsの新着表示と詳細画面での既読更新を有効にし、public bill/sightingのデータ形式と書き込み互換性は維持します。
 3. iPhone / Android / Macで匿名UID取得、初回登録後の一覧追加、検索だけでは追加されないこと、詳細遷移、公開閲覧、15分制限を確認します。
 4. 旧clientが使われなくなったことを確認後、`firebase.strict.json` で `firestore.strict.rules` をdeployします。この段階でbill/sighting書き込みのAuth必須化とstrict 15分制限へ移行します。今回はRulesの本番deployは行いません。
 
