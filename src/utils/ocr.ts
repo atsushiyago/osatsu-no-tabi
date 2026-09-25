@@ -362,15 +362,48 @@ export interface PreprocessedPass {
   stats: ImagePixelStats;
 }
 
-export interface PsmWhitelistDiagnostic {
-  psmName: 'SINGLE_LINE' | 'SINGLE_WORD' | 'RAW_LINE';
-  whitelist: 'on' | 'off';
+export interface PsmImageDiagnostic {
+  imageVariant: 'クロップ直後' | 'Contrast Enhanced' | 'Otsu Binarized';
+  psmName: 'SINGLE_WORD' | 'RAW_LINE';
+  padding: boolean;
+  paddingPx: number;
   rawText: string;
   compactText: string;
   confidence: number;
   durationMs: number;
   isValid: boolean;
   error?: string;
+}
+
+async function addWhitePadding(source: Blob): Promise<{ blob: Blob; paddingPx: number }> {
+  const img = new Image();
+  const sourceUrl = URL.createObjectURL(source);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Failed to load image for padding'));
+      img.src = sourceUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
+
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  const paddingPx = Math.min(30, Math.max(20, Math.round(height * 0.1)));
+  const canvas = document.createElement('canvas');
+  canvas.width = width + paddingPx * 2;
+  canvas.height = height + paddingPx * 2;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context unavailable for padding');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(img, paddingPx, paddingPx, width, height);
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Failed to encode padded image')), 'image/png');
+  });
+  return { blob, paddingPx };
 }
 
 /**
@@ -541,7 +574,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
-  onPsmDiagnostics?: (results: PsmWhitelistDiagnostic[]) => void
+  onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void
 ): Promise<string[]> {
   const debugTiming = isDebugTiming();
 
@@ -609,56 +642,69 @@ export async function recognizeBanknoteSerialFromImage(
     }
 
     if (debugTiming) {
-      const diagnosticResults: PsmWhitelistDiagnostic[] = [];
+      const diagnosticResults: PsmImageDiagnostic[] = [];
+      const contrastPass = passes.find((pass) => pass.name.includes('Contrast'));
+      const otsuPass = passes.find((pass) => pass.name.includes('Otsu'));
+      const imageVariants: Array<{ name: PsmImageDiagnostic['imageVariant']; blob: Blob | null }> = [
+        { name: 'クロップ直後', blob: imageFileOrBlob },
+        { name: 'Contrast Enhanced', blob: contrastPass?.blob || null },
+        { name: 'Otsu Binarized', blob: otsuPass?.blob || null },
+      ];
       const psmCases = [
-        { name: 'SINGLE_LINE' as const, value: PSM.SINGLE_LINE },
         { name: 'SINGLE_WORD' as const, value: PSM.SINGLE_WORD },
         { name: 'RAW_LINE' as const, value: PSM.RAW_LINE },
       ];
 
-      for (const psm of psmCases) {
-        for (const whitelistEnabled of [true, false]) {
-          const whitelist = whitelistEnabled ? 'on' : 'off';
-          const label = `${psm.name} whitelist ${whitelist}`;
-          onProgress?.(`OCR診断中... (${label})`);
-          onRecognizeEvent?.({ type: 'start', pass: label });
-          let recognizeStartedAt: number | null = null;
-          let rawText = '';
-          let confidence = 0;
-          let durationMs = 0;
-          let errorMessage: string | undefined;
+      for (const variant of imageVariants) {
+        for (const psm of psmCases) {
+          for (const usePadding of [false, true]) {
+            const label = `${variant.name} / ${psm.name} / padding ${usePadding ? 'on' : 'off'}`;
+            onProgress?.(`OCR診断中... (${label})`);
+            onRecognizeEvent?.({ type: 'start', pass: label });
+            let recognizeStartedAt: number | null = null;
+            let rawText = '';
+            let confidence = 0;
+            let durationMs = 0;
+            let paddingPx = 0;
+            let errorMessage: string | undefined;
 
-          try {
-            await worker.setParameters({
-              tessedit_pageseg_mode: psm.value,
-              tessedit_char_whitelist: whitelistEnabled ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' : '',
+            try {
+              if (!variant.blob) throw new Error(`${variant.name} image is unavailable`);
+              const input = usePadding ? await addWhitePadding(variant.blob) : { blob: variant.blob, paddingPx: 0 };
+              paddingPx = input.paddingPx;
+              await worker.setParameters({
+                tessedit_pageseg_mode: psm.value,
+                tessedit_char_whitelist: '',
+              });
+              recognizeStartedAt = performance.now();
+              const ret = await worker.recognize(input.blob);
+              rawText = ret.data.text || '';
+              confidence = ret.data.confidence ?? 0;
+              durationMs = performance.now() - recognizeStartedAt;
+              onRecognizeEvent?.({ type: 'end', pass: label });
+            } catch (err) {
+              const error = err as Error & { code?: string };
+              durationMs = recognizeStartedAt === null ? 0 : performance.now() - recognizeStartedAt;
+              errorMessage = error.message || String(err);
+              console.log(`[OCR Debug] ${label} error=${errorMessage}`);
+            }
+
+            const compactText = rawText.replace(/\s/g, '');
+            diagnosticResults.push({
+              imageVariant: variant.name,
+              psmName: psm.name,
+              padding: usePadding,
+              paddingPx,
+              rawText,
+              compactText,
+              confidence,
+              durationMs,
+              isValid: validateSerialNumber(compactText).isValid,
+              error: errorMessage,
             });
-            recognizeStartedAt = performance.now();
-            const ret = await worker.recognize(imageFileOrBlob);
-            rawText = ret.data.text || '';
-            confidence = ret.data.confidence ?? 0;
-            durationMs = performance.now() - recognizeStartedAt;
-            onRecognizeEvent?.({ type: 'end', pass: label });
-          } catch (err) {
-            const error = err as Error & { code?: string };
-            durationMs = recognizeStartedAt === null ? 0 : performance.now() - recognizeStartedAt;
-            errorMessage = error.message || String(err);
-            console.log(`[OCR Debug] ${label} error=${errorMessage}`);
+            onPsmDiagnostics?.([...diagnosticResults]);
+            console.log(`[OCR Debug] ${label} raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" compact="${compactText}" confidence=${confidence.toFixed(1)}% time=${durationMs.toFixed(0)}ms valid=${validateSerialNumber(compactText).isValid}`);
           }
-
-          const compactText = rawText.replace(/\s/g, '');
-          diagnosticResults.push({
-            psmName: psm.name,
-            whitelist,
-            rawText,
-            compactText,
-            confidence,
-            durationMs,
-            isValid: validateSerialNumber(compactText).isValid,
-            error: errorMessage,
-          });
-          onPsmDiagnostics?.([...diagnosticResults]);
-          console.log(`[OCR Debug] ${label} raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" compact="${compactText}" confidence=${confidence.toFixed(1)}% time=${durationMs.toFixed(0)}ms valid=${validateSerialNumber(compactText).isValid}`);
         }
       }
 
