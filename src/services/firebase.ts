@@ -31,7 +31,7 @@ if (isFirebaseConfigured) {
 } else {
   if (import.meta.env.PROD) {
     console.error(
-      '【本番環境警告】Firebaseの環境変数が未設定です。VercelのProject Settings > Environment Variablesで VITE_FIREBASE_* を設定してください。'
+      '【本番環境警告】Firebaseの環境変数が未設定です。Cloudflare (Workers Buildsの環境変数) で VITE_FIREBASE_* を設定してください。'
     );
   } else {
     console.info('Firebase environment variables not set. Running in local demo mode for development.');

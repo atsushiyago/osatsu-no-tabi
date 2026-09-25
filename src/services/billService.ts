@@ -243,7 +243,7 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
   if (import.meta.env.PROD) {
-    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+    throw new Error('本番環境のFirebase環境変数が設定されていません。Cloudflareの環境変数 (VITE_FIREBASE_*) を確認してください。');
   }
 
   // 開発環境のみのデモモード（ローカルリポジトリ）
@@ -422,7 +422,7 @@ export async function registerBillSighting(
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
   if (import.meta.env.PROD) {
-    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+    throw new Error('本番環境のFirebase環境変数が設定されていません。Cloudflareの環境変数 (VITE_FIREBASE_*) を確認してください。');
   }
 
   // 開発環境のみのデモモード（ローカルリポジトリ）
@@ -592,7 +592,7 @@ export async function getGlobalStats(): Promise<GlobalStats> {
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
   if (import.meta.env.PROD) {
-    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+    throw new Error('本番環境のFirebase環境変数が設定されていません。Cloudflareの環境変数 (VITE_FIREBASE_*) を確認してください。');
   }
 
   // 開発環境のみのデモモード（ローカルリポジトリ）
@@ -667,7 +667,7 @@ export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightin
 
   // 本番環境でFirebaseが設定されていない場合は事故防止のためエラーを投げる
   if (import.meta.env.PROD) {
-    throw new Error('本番環境のFirebase環境変数が設定されていません。VercelのEnvironment Variablesを確認してください。');
+    throw new Error('本番環境のFirebase環境変数が設定されていません。Cloudflareの環境変数 (VITE_FIREBASE_*) を確認してください。');
   }
 
   // 開発環境のみのデモモード

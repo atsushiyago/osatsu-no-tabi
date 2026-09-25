@@ -112,7 +112,7 @@ export function App() {
             lineHeight: 1.4,
           }}
         >
-          ⚠️ Firebase環境変数が未設定です。VercelのEnvironment Variablesを設定してください。
+          ⚠️ Firebase環境変数が未設定です。Cloudflare (Workers Builds) の環境変数を設定してください。
         </div>
       )}
 

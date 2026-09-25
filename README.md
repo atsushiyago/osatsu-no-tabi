@@ -25,7 +25,7 @@
 - **演出**: Canvas Confetti
 - **バックエンド / データベース**: Firebase Firestore
 - **スタイリング**: Vanilla CSS（デザインシステム・トークン定義、外部ユーティリティ不要）
-- **デプロイ対象**: Vercel
+- **デプロイ対象**: Cloudflare Workers (Static Assets)
 
 ---
 
@@ -49,10 +49,14 @@ npm run dev
 ブラウザで表示されたURL（例: `http://localhost:5173/`）を開きます。
 ※ Firebaseの環境変数が設定されていなくても、内蔵のローカルリポジトリ＆サンプルデータですべての機能を即座にお試しいただけます。
 
-### 4. プロダクションビルドの確認
+### 4. プロダクションビルドとCloudflare Workers環境での動作確認
 ```bash
+# Viteビルド
 npm run build
-npm run preview
+
+# Cloudflare Workersローカル環境（Wrangler）での静的アセット配信テスト
+npm run preview:cf
+# (または npm run preview でViteプレビューサーバー起動)
 ```
 
 ---
@@ -69,7 +73,7 @@ npm run preview
 ### 環境変数 (`.env`)
 ```ini
 VITE_FIREBASE_API_KEY=AIzaSy...
-VITE_FIREBASE_AUTH_DOMAIN=your-app.firebaseapp.com
+VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=your-project-id
 VITE_FIREBASE_STORAGE_BUCKET=your-app.appspot.com
 VITE_FIREBASE_MESSAGING_SENDER_ID=1234567890
@@ -128,15 +132,26 @@ VITE_FIREBASE_APP_ID=1:1234567890:web:...
    - 本サービスでは紙幣の写真や画像データをサーバーにアップロード・保存しません。
 3. **いたずら・連投抑制**
    - 同一端末から同一記番号の短時間（15分以内）の重複送信をクライアント側でブロック。
-   - サービス層（`billService.ts`）に抽象化レイヤーを設けており、将来的にFirebase AuthやCloud FunctionsでのRate Limit、App Check (CAPTCHA)、記番号のSHA-256ハッシュ化をシームレスに差し替え可能です。
+   - サービス層（`billService.ts`）に抽象化レイヤーを設けており、将来的にFirebase AuthやCloud FunctionsでのRate Limit、App Check (reCAPTCHA Enterprise)、記番号のSHA-256ハッシュ化をシームレスに差し替え可能です。
 4. **紙幣への書き込み厳禁の明示**
    - 米国等で見られるお札へのURLスタンプや落書きを明確に禁止し、自然な流通を観察する市民科学プロジェクトとしての健全性を維持します。
 
 ---
 
-## 🚢 Vercelへのデプロイ方法
+## 🚢 Cloudflare Workers (Static Assets) へのデプロイ方法
 
-### 1. GitHubリポジトリへのプッシュ
+本プロジェクトは **Cloudflare Workers Static Assets** を採用しています。
+Cloudflare公式の最新推奨（2026年基準）に準拠し、Cloudflare PagesやレガシーなWorkers Sitesを使用せず、Viteでビルドされた静的アセット（`dist/`）を直接Workers基盤から高速・グローバルに配信します。
+
+本アプリはHash Router方式（`#/register`、`#/bill/:serial`）を採用しているため、エッジ側の特別なSPAリライト・リダイレクト設定は不要です。
+
+---
+
+### 方法 A. Cloudflare Dashboard + GitHub連携（推奨・最優先）
+
+GitリポジトリとCloudflareを連携させて自動CI/CDを構築する手順です。
+
+#### 1. GitHubリポジトリへのプッシュ
 ローカルの変更をGitHubなどのリモートリポジトリへプッシュします。
 ```bash
 git remote add origin <あなたのGitHubリポジトリURL>
@@ -144,35 +159,63 @@ git branch -M main
 git push -u origin main
 ```
 
-### 2. Vercelへのインポート
-1. [Vercel Dashboard](https://vercel.com/) にログインし、「**Add New...**」>「**Project**」を選択。
-2. 対象の GitHub リポジトリを選択して「**Import**」をクリック。
-3. **Build and Output Settings**（デフォルトで自動検出されます）:
-   - Framework Preset: `Vite`
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-   - Install Command: `npm install`
+#### 2. Cloudflare Dashboardでプロジェクトを作成
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/) にログインします。
+2. 左側メニューから **Compute (Workers & Pages)** を選択します。
+3. **Create**（または「アプリケーションの作成」）をクリックし、**Workers** タブを選択。
+4. **Connect to Git**（Gitに接続）を選択し、GitHubアカウントを連携して対象リポジトリを選択します。
 
-### 3. Vercel環境変数の設定（最重要）
-本番環境でFirestoreと通信するために、必ず以下の環境変数を設定してください。
-未設定の場合、本番環境ではデータの誤保存事故を防ぐため、localStorageへのフォールバックを行わずエラー画面が表示される安全設計になっています。
+#### 3. ビルド設定
+リポジトリのルートにある `wrangler.jsonc` を自動認識しますが、設定画面で以下を確認・指定してください:
+- **Project Name**: `osatsu-no-tabi`
+- **Framework Preset**: `Vite` (または None)
+- **Build command**: `npm run build`
+- **Build output directory**: `dist`
+- **Root directory**: `/`
+
+#### 4. Firebase環境変数の設定（最重要）
+本番環境でFirestoreと通信するために、ビルド時環境変数を設定します。
+
+> [!IMPORTANT]
+> **ビルド時環境変数（Build Environment Variables）として設定してください**
+> `VITE_FIREBASE_*` はViteが `npm run build` 実行時に静的ファイル（JSバンドル）内へ埋め込む変数（`import.meta.env`）です。
+> Worker runtimeのSecretではなく、**ビルド設定画面の Environment Variables (ビルド環境変数)** に登録してください。
 
 設定場所:
-**Vercel Dashboard** → 対象プロジェクト → **Settings** → **Environment Variables**
+**Cloudflare Dashboard** → 対象プロジェクト → **Settings** → **Builds**（または作成画面の「Environment variables」）
 
-| 変数名 | 説明 | 必須環境 |
-| :--- | :--- | :--- |
-| `VITE_FIREBASE_API_KEY` | Firebase Web APIキー | Production, Preview |
-| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Authドメイン | Production, Preview |
-| `VITE_FIREBASE_PROJECT_ID` | Firebase プロジェクトID | Production, Preview |
-| `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storageバケット | Production, Preview |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | 送信者ID | Production, Preview |
-| `VITE_FIREBASE_APP_ID` | Firebase アプリID | Production, Preview |
+| 変数名 | 説明 |
+| :--- | :--- |
+| `VITE_FIREBASE_API_KEY` | Firebase Web APIキー |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Authドメイン |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase プロジェクトID |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storageバケット |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | 送信者ID |
+| `VITE_FIREBASE_APP_ID` | Firebase アプリID |
 
-※ 少なくとも **Production** には必ず設定してください。
+※ 未設定の場合、本番環境ではデータの誤保存事故を防ぐため、localStorageへのフォールバックを行わずエラー画面が表示される安全設計になっています。
 
-### 4. デプロイ実行
-「**Deploy**」ボタンをクリックします。1分前後でビルドが完了し、本番URL（`https://your-app.vercel.app`）が発行されます。
+#### 5. デプロイと動作確認
+- **Save and Deploy** をクリックします。
+- 数十秒でビルド・静的アセット配置が完了し、`https://osatsu-no-tabi.<your-subdomain>.workers.dev` のような本番URLが発行されます。
+
+---
+
+### 方法 B. Wrangler CLI による直接デプロイ
+
+ターミナルから直接デプロイする場合の手順です。
+
+#### 1. Cloudflareへのログイン
+```bash
+npx wrangler login
+```
+
+#### 2. ビルド＆デプロイ
+`.env` に本番用 `VITE_FIREBASE_*` が設定されていることを確認し、以下を実行します:
+```bash
+npm run deploy
+```
+（`npm run build && wrangler deploy` が実行され、`dist/` ディレクトリがCloudflare Workers Static Assetsとして即座に公開されます。）
 
 ---
 
@@ -190,6 +233,18 @@ git push -u origin main
 - [ ] **8. 地図に2地点が出る**: Leaflet地図上に2つのピン（起点・最新）と、それらを結ぶ点線ポリラインが表示されること。
 - [ ] **9. ページを閉じて再度開いてもFirestoreから表示される**: ブラウザのキャッシュをクリアするか別タブで `/bill/BB123456B` を直接開いても、同じデータがFirestoreから取得できること。
 - [ ] **10. PCとスマホの両方から同じ紙幣を参照できる**: スマホで登録した記番号をPCブラウザの「検索」に入力し、同一の移動履歴が表示されること（マルチデバイス同期の確認）。
+
+---
+
+## 🛡️ 次のセキュリティ強化ステップ: Firebase App Check
+
+本番公開完了後の次工程として **Firebase App Check** の導入を推奨します。
+未認証のスクリプトや不正なクライアントからのFirestore直接呼び出しを遮断し、正規のWebアプリ経由のトラフィックのみを許可します。
+
+> [!NOTE]
+> **最新公式推奨: reCAPTCHA Enterprise の利用**
+> Firebase公式ドキュメントでは、新規Web統合におけるApp Checkプロバイダとして従来のreCAPTCHA v3ではなく **reCAPTCHA Enterprise**（`ReCaptchaEnterpriseProvider`）の利用が推奨されています。
+> Cloudflare公開後、Firebase ConsoleおよびGoogle Cloud ConsoleでreCAPTCHA Enterpriseキーを取得し、アプリ初期化コード（`firebase.ts`）に統合する予定です。
 
 ---
 
