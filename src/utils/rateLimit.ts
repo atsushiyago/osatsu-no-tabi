@@ -7,6 +7,9 @@
 const STORAGE_KEY_RECENT_SUBMISSIONS = 'osatsu_recent_submissions';
 const COOLDOWN_MINUTES = 15;
 
+// テスト・開発環境用フラグ: 公開前の動作検証を円滑に行うため無効化しています
+const ENABLE_RATE_LIMIT = false;
+
 interface SubmissionRecord {
   serial: string;
   timestamp: number;
@@ -17,6 +20,11 @@ export function checkSubmissionAllowed(serial: string): {
   remainingMinutes?: number;
   reason?: string;
 } {
+  // テスト期間中は常に許可
+  if (!ENABLE_RATE_LIMIT) {
+    return { allowed: true };
+  }
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY_RECENT_SUBMISSIONS);
     const records: SubmissionRecord[] = raw ? JSON.parse(raw) : [];
