@@ -225,14 +225,15 @@ export async function getBillBySerial(serial: string): Promise<BillWithSightings
     const sightingsRef = collection(db, 'sightings');
     const sq = query(
       sightingsRef,
-      where('billId', '==', bill.id),
-      orderBy('step', 'asc')
+      where('billId', '==', bill.id)
     );
     const sSnap = await getDocs(sq);
-    const sightings = sSnap.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...docSnap.data(),
-    })) as Sighting[];
+    const sightings = sSnap.docs
+      .map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      } as Sighting))
+      .sort((a, b) => a.step - b.step);
 
     return {
       ...bill,
@@ -281,14 +282,15 @@ export async function registerBillSighting(
         // 直前の発見を取得
         const sq = query(
           sightingsColRef,
-          where('billId', '==', billId),
-          orderBy('step', 'asc')
+          where('billId', '==', billId)
         );
         const sSnap = await getDocs(sq);
-        const existingSightings = sSnap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as Sighting[];
+        const existingSightings = sSnap.docs
+          .map((d) => ({
+            id: d.id,
+            ...d.data(),
+          } as Sighting))
+          .sort((a, b) => a.step - b.step);
 
         const lastSighting = existingSightings[existingSightings.length - 1];
         const distKm = lastSighting
@@ -615,14 +617,15 @@ export async function getRecentJourneys(limitCount = 5): Promise<BillWithSightin
       const sightingsRef = collection(db, 'sightings');
       const sq = query(
         sightingsRef,
-        where('billId', '==', bill.id),
-        orderBy('step', 'asc')
+        where('billId', '==', bill.id)
       );
       const sSnap = await getDocs(sq);
-      const sightings = sSnap.docs.map((sDoc) => ({
-        id: sDoc.id,
-        ...sDoc.data(),
-      })) as Sighting[];
+      const sightings = sSnap.docs
+        .map((sDoc) => ({
+          id: sDoc.id,
+          ...sDoc.data(),
+        } as Sighting))
+        .sort((a, b) => a.step - b.step);
 
       journeys.push({
         ...bill,
