@@ -2,6 +2,7 @@ import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import {
   initializeAppCheck,
   ReCaptchaEnterpriseProvider,
+  getToken,
   type AppCheck,
 } from 'firebase/app-check';
 import { initializeFirestore, type Firestore } from 'firebase/firestore';
@@ -108,6 +109,66 @@ if (isFirebaseConfigured) {
   } else {
     console.info('Firebase environment variables not set. Running in local demo mode for development.');
   }
+}
+
+/**
+ * App Check 診断用関数
+ * ?debug=timing が指定されている場合のみ実行され、
+ * getToken(appCheck, true) を強制実行して結果を検証します。
+ * - 成功時: token length と expireTimeMillis のみ console.log (token本文は絶対に出力しない)
+ * - 失敗時: error code / message を console.error
+ */
+export async function runDiagnoseAppCheck(): Promise<{
+  success: boolean;
+  length?: number;
+  expireTimeMillis?: number;
+  error?: string;
+} | null> {
+  if (typeof window === 'undefined') return null;
+  if (!window.location.search.includes('debug=timing')) return null;
+
+  if (!appCheck) {
+    const errorMsg = isAppCheckConfigured
+      ? 'App Check 初期化インスタンスが存在しません。'
+      : 'VITE_RECAPTCHA_ENTERPRISE_SITE_KEY が未設定のため App Check は初期化されていません。';
+    console.error(`[App Check Diagnostics] 診断エラー: ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  try {
+    const result = await getToken(appCheck, true);
+    const tokenLen = result?.token ? result.token.length : 0;
+    const expireTime = (result as { expireTimeMillis?: number })?.expireTimeMillis;
+
+    // token本文そのものは絶対にconsoleへ出さない
+    console.log(
+      `[App Check Diagnostics] Token取得成功: length=${tokenLen}, expireTimeMillis=${expireTime ?? 'N/A'}`
+    );
+
+    return {
+      success: true,
+      length: tokenLen,
+      expireTimeMillis: expireTime,
+    };
+  } catch (err: unknown) {
+    const errorObj = err as { code?: string; message?: string };
+    const code = errorObj?.code || 'UNKNOWN';
+    const message = errorObj?.message || String(err);
+
+    console.error(
+      `[App Check Diagnostics] Token取得失敗: code=${code}, message=${message}`
+    );
+
+    return {
+      success: false,
+      error: `[${code}] ${message}`,
+    };
+  }
+}
+
+// ?debug=timing が付いている場合のみ初期化完了後に診断を自動実行
+if (typeof window !== 'undefined' && window.location.search.includes('debug=timing') && appCheck) {
+  runDiagnoseAppCheck();
 }
 
 export { app, appCheck, db };

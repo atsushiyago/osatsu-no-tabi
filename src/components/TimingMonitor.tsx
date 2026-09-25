@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { subscribeTiming, clearTimingLogs, type TimingEntry } from '../utils/timing';
-import { isAppCheckConfigured } from '../services/firebase';
+import { isAppCheckConfigured, runDiagnoseAppCheck } from '../services/firebase';
 import { Activity, ChevronDown, ChevronUp, Trash2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export const TimingMonitor = () => {
@@ -10,12 +10,27 @@ export const TimingMonitor = () => {
 
   const [entries, setEntries] = useState<TimingEntry[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [diagResult, setDiagResult] = useState<{
+    success: boolean;
+    length?: number;
+    expireTimeMillis?: number;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isVisible) return;
-    return subscribeTiming((newEntries) => {
+    const unsub = subscribeTiming((newEntries) => {
       setEntries(newEntries);
     });
+
+    // ?debug=timing の場合は診断を実行して状態を保持
+    if (typeof window !== 'undefined' && window.location.search.includes('debug=timing')) {
+      runDiagnoseAppCheck().then((res) => {
+        if (res) setDiagResult(res);
+      });
+    }
+
+    return unsub;
   }, [isVisible]);
 
   if (!isVisible) return null;
@@ -146,6 +161,39 @@ export const TimingMonitor = () => {
                 </>
               )}
             </div>
+
+            {diagResult && (
+              <div
+                style={{
+                  fontSize: '10px',
+                  padding: '4px 6px',
+                  borderRadius: 4,
+                  marginBottom: 8,
+                  background: diagResult.success
+                    ? 'rgba(16, 185, 129, 0.1)'
+                    : 'rgba(239, 68, 68, 0.15)',
+                  color: diagResult.success ? '#6ee7b7' : '#fca5a5',
+                  border: `1px solid ${diagResult.success ? 'rgba(110, 231, 183, 0.2)' : 'rgba(252, 165, 165, 0.3)'}`,
+                  lineHeight: 1.4,
+                  wordBreak: 'break-all',
+                }}
+              >
+                {diagResult.success ? (
+                  <div>
+                    <div><strong>[診断] getToken 成功</strong></div>
+                    <div style={{ color: '#94a3b8' }}>
+                      Token長: {diagResult.length}文字
+                      {diagResult.expireTimeMillis && ` (期限: ${new Date(diagResult.expireTimeMillis).toLocaleTimeString()})`}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div><strong>[診断] getToken 失敗</strong></div>
+                    <div style={{ color: '#fca5a5' }}>{diagResult.error}</div>
+                  </div>
+                )}
+              </div>
+            )}
             {entries.length === 0 ? (
               <div style={{ color: '#64748b', textAlign: 'center', padding: '12px 0' }}>ログはありません</div>
             ) : (
