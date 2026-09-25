@@ -11,7 +11,8 @@
     "preview:cf": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "test:rules": "firebase emulators:exec --only firestore \"node test/runner.cjs\"",
-    "test:appcheck": "node --test test/appcheck.test.js"
+    "test:appcheck": "node --test test/appcheck.test.js",
+    "test:ocr": "node --test test/ocr-parser.test.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
@@ -19,7 +20,8 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^1.48.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",

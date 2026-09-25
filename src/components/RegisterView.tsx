@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Camera,
   Navigation,
@@ -7,8 +7,11 @@ import {
   HelpCircle,
   Sparkles,
   Lock,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
+import { recognizeBanknoteSerialFromImage } from '../utils/ocr.ts';
 import {
   PREFECTURES,
   getCitiesByPrefecture,
@@ -49,6 +52,72 @@ export const RegisterView = ({
 
   const [existingBill, setExistingBill] = useState<BillWithSightings | null>(null);
   const [isCheckingExisting, setIsCheckingExisting] = useState(false);
+
+  // OCR機能関連 state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [ocrStatusMessage, setOcrStatusMessage] = useState<string | null>(null);
+  const [ocrCandidates, setOcrCandidates] = useState<string[]>([]);
+  const [ocrMessage, setOcrMessage] = useState<{
+    type: 'success' | 'warn' | 'info';
+    text: string;
+  } | null>(null);
+
+  const handleTriggerOcr = () => {
+    if (isOcrProcessing) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // 同一ファイルを再度選択した場合にも onChange が発火するようクリア
+    e.target.value = '';
+
+    if (!file) return;
+
+    setIsOcrProcessing(true);
+    setOcrStatusMessage('記番号を読み取っています…');
+    setOcrMessage(null);
+    setOcrCandidates([]);
+
+    try {
+      const candidates = await recognizeBanknoteSerialFromImage(file, (msg) => {
+        setOcrStatusMessage(msg);
+      });
+
+      if (candidates.length === 1) {
+        setSerialInput(candidates[0]);
+        setOcrCandidates(candidates);
+        setOcrMessage({
+          type: 'success',
+          text: `候補「${formatSerialDisplay(candidates[0])}」を入力しました。記番号を確認してください。`,
+        });
+      } else if (candidates.length > 1) {
+        setSerialInput(candidates[0]);
+        setOcrCandidates(candidates);
+        setOcrMessage({
+          type: 'info',
+          text: `複数の候補が見つかりました（${candidates.length}件）。該当する記番号を選択または手修正してください。`,
+        });
+      } else {
+        setOcrCandidates([]);
+        setOcrMessage({
+          type: 'warn',
+          text: '記番号を読み取れませんでした。記番号部分を大きく明るい場所で撮影するか、手入力してください。',
+        });
+      }
+    } catch (err) {
+      console.warn('OCR processing error:', err);
+      setOcrCandidates([]);
+      setOcrMessage({
+        type: 'warn',
+        text: '読み取り中にエラーが発生しました。もう一度撮影するか、手入力してください。',
+      });
+    } finally {
+      setIsOcrProcessing(false);
+      setOcrStatusMessage(null);
+    }
+  };
 
   // 都道府県が変更されたら市区町村リストを更新
   useEffect(() => {
@@ -350,36 +419,169 @@ export const RegisterView = ({
             ※全角・半角・小文字は自動変換されます。ハイフンやスペースは不要です。
           </p>
 
-          {/* 将来のOCRカメラ用プレースホルダー */}
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '10px 14px',
-              backgroundColor: '#f8fafc',
-              border: '1px dashed #cbd5e1',
-              borderRadius: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              color: '#64748b',
-              fontSize: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Camera size={16} color="#94a3b8" />
-              <span>カメラで自動読み取り (OCR)</span>
-            </div>
-            <span
+          {/* カメラOCR読み取り入力（非表示） */}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+            disabled={isOcrProcessing}
+            id="ocr-file-input"
+          />
+
+          {/* カメラで記番号を読むボタン & ガイド */}
+          <div style={{ marginTop: '10px' }}>
+            <button
+              type="button"
+              onClick={handleTriggerOcr}
+              disabled={isOcrProcessing}
               style={{
-                fontSize: '10px',
-                background: '#e2e8f0',
-                padding: '2px 6px',
-                borderRadius: '4px',
-                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                width: '100%',
+                padding: '11px 16px',
+                backgroundColor: isOcrProcessing ? '#f1f5f9' : '#f8fafc',
+                color: isOcrProcessing ? '#94a3b8' : '#334155',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: isOcrProcessing ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              id="btn-ocr-camera"
+            >
+              {isOcrProcessing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>{ocrStatusMessage || '記番号を読み取っています…'}</span>
+                </>
+              ) : (
+                <>
+                  <Camera size={16} color="#475569" />
+                  <span>カメラで記番号を読む</span>
+                </>
+              )}
+            </button>
+
+            <div
+              style={{
+                fontSize: '11px',
+                color: '#64748b',
+                marginTop: '6px',
+                textAlign: 'center',
               }}
             >
-              将来拡張スロット
-            </span>
+              📷 記番号が大きく写るように撮影してください（画像は端末内でのみ処理されます）
+            </div>
+
+            {/* OCR結果・候補表示 */}
+            {ocrMessage && (
+              <div
+                style={{
+                  marginTop: '10px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  backgroundColor:
+                    ocrMessage.type === 'success'
+                      ? '#f0fdf4'
+                      : ocrMessage.type === 'warn'
+                      ? '#fffbeb'
+                      : '#eff6ff',
+                  border: `1px solid ${
+                    ocrMessage.type === 'success'
+                      ? '#bbf7d0'
+                      : ocrMessage.type === 'warn'
+                      ? '#fde68a'
+                      : '#bfdbfe'
+                  }`,
+                  color:
+                    ocrMessage.type === 'success'
+                      ? '#166534'
+                      : ocrMessage.type === 'warn'
+                      ? '#92400e'
+                      : '#1e40af',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {ocrMessage.type === 'success' ? (
+                    <CheckCircle size={15} style={{ flexShrink: 0 }} />
+                  ) : ocrMessage.type === 'warn' ? (
+                    <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                  ) : (
+                    <Sparkles size={15} style={{ flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontWeight: 600 }}>{ocrMessage.text}</span>
+                </div>
+
+                {/* 複数候補が存在する場合の選択チップ */}
+                {ocrCandidates.length > 1 && (
+                  <div style={{ marginTop: '4px' }}>
+                    <div style={{ fontSize: '11px', marginBottom: '4px', opacity: 0.85 }}>
+                      候補一覧（タップで入力欄に反映）:
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {ocrCandidates.map((cand) => (
+                        <button
+                          type="button"
+                          key={cand}
+                          onClick={() => {
+                            setSerialInput(cand);
+                          }}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            fontFamily: 'monospace',
+                            backgroundColor: serialInput === cand ? '#2563eb' : '#ffffff',
+                            color: serialInput === cand ? '#ffffff' : '#1e293b',
+                            border: `1px solid ${serialInput === cand ? '#2563eb' : '#cbd5e1'}`,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {cand}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 候補なしの場合の案内ボタン */}
+                {ocrCandidates.length === 0 && ocrMessage.type === 'warn' && (
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={handleTriggerOcr}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #fde68a',
+                        borderRadius: '6px',
+                        color: '#92400e',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <RefreshCw size={12} />
+                      <span>もう一度撮影</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
