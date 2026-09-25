@@ -1,5 +1,5 @@
 import type { CropMetadata } from './CropModal';
-import type { ImagePixelStats, PreprocessedPass, SyntheticOcrResult } from '../utils/ocr';
+import type { FirstPassComparison, ImagePixelStats, PreprocessedPass } from '../utils/ocr';
 
 export interface OcrDebugData {
   rawImageUrl: string;
@@ -10,8 +10,7 @@ export interface OcrDebugData {
   croppedStats?: ImagePixelStats;
   passes: PreprocessedPass[];
   error?: { pass: string; message: string; code?: string };
-  syntheticResult?: SyntheticOcrResult;
-  banknoteFound?: boolean;
+  firstPassComparison?: FirstPassComparison;
 }
 
 interface OcrDebugPanelProps {
@@ -19,7 +18,7 @@ interface OcrDebugPanelProps {
 }
 
 export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
-  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error, syntheticResult, banknoteFound } = data;
+  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error, firstPassComparison } = data;
 
   const contrastPass = passes.find((p) => p.name.includes('Contrast'));
   const otsuPass = passes.find((p) => p.name.includes('Otsu'));
@@ -84,22 +83,21 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
         </div>
       )}
 
-      {syntheticResult && (
+      {firstPassComparison && (
         <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', fontFamily: 'monospace', lineHeight: 1.6 }}>
-          <div style={{ color: '#38bdf8', fontWeight: 700 }}>Synthetic OCR: <span style={{ color: syntheticResult.passed ? '#4ade80' : '#f87171' }}>{syntheticResult.passed ? 'PASS' : 'FAIL'}</span></div>
-          <div>raw text: <strong>{syntheticResult.rawText || '(empty)'}</strong></div>
-          <div>confidence: <strong>{syntheticResult.confidence.toFixed(1)}%</strong></div>
-          <div>processing time: <strong>{syntheticResult.durationMs.toFixed(0)} ms</strong></div>
-          {syntheticResult.error && <div style={{ color: '#fca5a5' }}>error: {syntheticResult.error}</div>}
-          {syntheticResult.passed && banknoteFound === false && (
-            <div style={{ marginTop: '6px', color: '#fbbf24' }}>Synthetic PASS / Banknote FAIL → Tesseract基本動作は正常。紙幣画像認識条件を次に調査します。</div>
-          )}
-          {!syntheticResult.passed && (
-            <div style={{ marginTop: '6px', color: '#fca5a5' }}>Synthetic FAIL → Tesseract worker / 設定 / 入力経路を次に調査します。</div>
-          )}
-          {syntheticResult.passed && banknoteFound === true && (
-            <div style={{ marginTop: '6px', color: '#4ade80' }}>Synthetic PASS / Banknote PASS</div>
-          )}
+          <div style={{ color: '#38bdf8', fontWeight: 700 }}>Same-pass consecutive recognition comparison</div>
+          <div style={{ marginTop: '4px' }}>First recognition:</div>
+          <div>raw text: <strong>{firstPassComparison.first.rawText || '(empty)'}</strong></div>
+          <div>confidence: <strong>{firstPassComparison.first.confidence.toFixed(1)}%</strong></div>
+          <div>processing time: <strong>{firstPassComparison.first.durationMs.toFixed(0)} ms</strong></div>
+          <div style={{ marginTop: '6px' }}>Second recognition:</div>
+          <div>raw text: <strong>{firstPassComparison.second.rawText || '(empty)'}</strong></div>
+          <div>confidence: <strong>{firstPassComparison.second.confidence.toFixed(1)}%</strong></div>
+          <div>processing time: <strong>{firstPassComparison.second.durationMs.toFixed(0)} ms</strong></div>
+          {firstPassComparison.error && <div style={{ color: '#fca5a5' }}>error: {firstPassComparison.error}</div>}
+          <div style={{ marginTop: '8px', color: firstPassComparison.outcome === 'First-recognition warm-up effect confirmed' ? '#fbbf24' : '#4ade80' }}>
+            {firstPassComparison.outcome}
+          </div>
         </div>
       )}
 

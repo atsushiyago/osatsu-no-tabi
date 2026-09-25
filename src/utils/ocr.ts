@@ -362,11 +362,10 @@ export interface PreprocessedPass {
   stats: ImagePixelStats;
 }
 
-export interface SyntheticOcrResult {
-  rawText: string;
-  confidence: number;
-  durationMs: number;
-  passed: boolean;
+export interface FirstPassComparison {
+  first: { rawText: string; confidence: number; durationMs: number };
+  second: { rawText: string; confidence: number; durationMs: number };
+  outcome: 'First-recognition warm-up effect confirmed' | 'Warm-up by repeated recognize not confirmed' | 'First recognition succeeded' | 'Inconclusive';
   error?: string;
 }
 
@@ -538,8 +537,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
-  onSyntheticResult?: (result: SyntheticOcrResult) => void,
-  onBanknoteResult?: (found: boolean) => void
+  onFirstPassComparison?: (comparison: FirstPassComparison) => void
 ): Promise<string[]> {
   const debugTiming = isDebugTiming();
 
@@ -577,12 +575,6 @@ export async function recognizeBanknoteSerialFromImage(
 
   let worker: any = null;
   const allCandidateSerials = new Map<string, { serial: string; maxConfidence: number; sourcePass: string }>();
-  const reportSyntheticFailure = (message: string) => {
-    const result: SyntheticOcrResult = { rawText: '', confidence: 0, durationMs: 0, passed: false, error: message };
-    onSyntheticResult?.(result);
-    console.log(`[OCR Debug] synthetic raw="" confidence=0.0% time=0ms result=FAIL message=${message}`);
-  };
-
   try {
     try {
       worker = await createWorker('eng', 1, debugTiming ? {
@@ -597,7 +589,6 @@ export async function recognizeBanknoteSerialFromImage(
     } catch (err) {
       const error = err as Error & { code?: string };
       onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
-      if (debugTiming) reportSyntheticFailure(error.message || String(err));
       throw err;
     }
 
@@ -610,50 +601,7 @@ export async function recognizeBanknoteSerialFromImage(
     } catch (err) {
       const error = err as Error & { code?: string };
       onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
-      if (debugTiming) reportSyntheticFailure(error.message || String(err));
       throw err;
-    }
-
-    if (debugTiming) {
-      let syntheticCanvas: HTMLCanvasElement | null = null;
-      try {
-        syntheticCanvas = document.createElement('canvas');
-        syntheticCanvas.width = 1000;
-        syntheticCanvas.height = 240;
-        const context = syntheticCanvas.getContext('2d');
-        if (!context) throw new Error('Canvas 2D context unavailable');
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, syntheticCanvas.width, syntheticCanvas.height);
-        context.fillStyle = '#000000';
-        context.font = 'bold 112px Arial, sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText('AB123456CD', syntheticCanvas.width / 2, syntheticCanvas.height / 2);
-
-        const syntheticBlob = await new Promise<Blob>((resolve, reject) => {
-          syntheticCanvas!.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Synthetic PNG encoding failed')), 'image/png');
-        });
-        const syntheticStart = performance.now();
-        onRecognizeEvent?.({ type: 'start', pass: 'Synthetic test' });
-        const syntheticRet = await worker.recognize(syntheticBlob);
-        onRecognizeEvent?.({ type: 'end', pass: 'Synthetic test' });
-        const rawText = syntheticRet.data.text || '';
-        const normalized = rawText.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const result: SyntheticOcrResult = {
-          rawText,
-          confidence: syntheticRet.data.confidence ?? 0,
-          durationMs: performance.now() - syntheticStart,
-          passed: normalized === 'AB123456CD',
-        };
-        onSyntheticResult?.(result);
-        console.log(`[OCR Debug] synthetic raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${result.confidence.toFixed(1)}% time=${result.durationMs.toFixed(0)}ms result=${result.passed ? 'PASS' : 'FAIL'}`);
-      } catch (err) {
-        const error = err as Error;
-        onRecognizeEvent?.({ type: 'error', pass: 'Synthetic test', message: error.message || String(err) });
-        reportSyntheticFailure(error.message || String(err));
-      } finally {
-        syntheticCanvas = null;
-      }
     }
 
     for (let i = 0; i < passes.length; i++) {
@@ -661,19 +609,72 @@ export async function recognizeBanknoteSerialFromImage(
       onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
 
       const passStart = debugTiming ? performance.now() : 0;
-      onRecognizeEvent?.({ type: 'start', pass: pass.name });
+      onRecognizeEvent?.({ type: 'start', pass: debugTiming && i === 0 ? `${pass.name} (first)` : pass.name });
       let ret;
       try {
         ret = await worker.recognize(pass.blob);
       } catch (err) {
         const error = err as Error & { code?: string };
         onRecognizeEvent?.({ type: 'error', pass: pass.name, message: error.message, code: error.code });
+        if (debugTiming && i === 0) {
+          onFirstPassComparison?.({
+            first: { rawText: '', confidence: 0, durationMs: performance.now() - passStart },
+            second: { rawText: '', confidence: 0, durationMs: 0 },
+            outcome: 'Inconclusive',
+            error: error.message || String(err),
+          });
+        }
         throw err;
       }
-      onRecognizeEvent?.({ type: 'end', pass: pass.name });
       const rawText = ret.data.text || '';
       const confidence = ret.data.confidence ?? 0;
       const passDuration = debugTiming ? performance.now() - passStart : 0;
+
+      if (debugTiming && i === 0) {
+        onRecognizeEvent?.({ type: 'end', pass: `${pass.name} (first)` });
+        const secondStart = performance.now();
+        let secondRawText = '';
+        let secondConfidence = 0;
+        let secondDuration = 0;
+        let secondError: string | undefined;
+        onRecognizeEvent?.({ type: 'start', pass: `${pass.name} (second)` });
+        try {
+          const secondRet = await worker.recognize(pass.blob);
+          secondRawText = secondRet.data.text || '';
+          secondConfidence = secondRet.data.confidence ?? 0;
+          secondDuration = performance.now() - secondStart;
+          onRecognizeEvent?.({ type: 'end', pass: `${pass.name} (second)` });
+        } catch (err) {
+          const error = err as Error & { code?: string };
+          secondDuration = performance.now() - secondStart;
+          secondError = error.message || String(err);
+          onRecognizeEvent?.({ type: 'error', pass: `${pass.name} (second)`, message: secondError, code: error.code });
+        }
+
+        const firstHasText = rawText.trim().length > 0;
+        const secondHasText = secondRawText.trim().length > 0;
+        const outcome = secondError
+          ? 'Inconclusive'
+          : !firstHasText && secondHasText
+            ? 'First-recognition warm-up effect confirmed'
+            : !firstHasText && !secondHasText
+              ? 'Warm-up by repeated recognize not confirmed'
+              : firstHasText && secondHasText
+                ? 'First recognition succeeded'
+                : 'Inconclusive';
+        const comparison: FirstPassComparison = {
+          first: { rawText, confidence, durationMs: passDuration },
+          second: { rawText: secondRawText, confidence: secondConfidence, durationMs: secondDuration },
+          outcome,
+          error: secondError,
+        };
+        onFirstPassComparison?.(comparison);
+        console.log(`[OCR Debug] First recognition: raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${confidence.toFixed(1)}% time=${passDuration.toFixed(0)}ms`);
+        console.log(`[OCR Debug] Second recognition: raw="${secondRawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${secondConfidence.toFixed(1)}% time=${secondDuration.toFixed(0)}ms`);
+        console.log(`[OCR Debug] ${outcome}`);
+      } else {
+        onRecognizeEvent?.({ type: 'end', pass: pass.name });
+      }
 
       // 候補抽出
       const passCandidates = extractSerialCandidates(rawText, 3);
@@ -715,9 +716,7 @@ export async function recognizeBanknoteSerialFromImage(
       (a, b) => b.maxConfidence - a.maxConfidence
     );
 
-    const candidates = sorted.slice(0, 3).map((item) => item.serial);
-    onBanknoteResult?.(candidates.length > 0);
-    return candidates;
+    return sorted.slice(0, 3).map((item) => item.serial);
   } finally {
     if (worker) {
       await worker.terminate();
