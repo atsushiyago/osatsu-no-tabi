@@ -84,6 +84,26 @@ function nextRateLimitData(
   };
 }
 
+function logRegistrationTransactionDebug(details: {
+  uid: string;
+  billId: string;
+  sightingId: string;
+  rateLimitPath: string;
+  rateLimitWrite: 'create' | 'update';
+  rateLimitData: Record<string, any>;
+}): void {
+  if (!isDebugTiming()) return;
+  console.debug('[Registration Debug] transaction writes', {
+    authUid: details.uid,
+    billId: details.billId,
+    sightingId: details.sightingId,
+    rateLimitPath: details.rateLimitPath,
+    rateLimitWrite: details.rateLimitWrite,
+    shortCount: details.rateLimitData.shortCount,
+    dailyCount: details.rateLimitData.dailyCount,
+  });
+}
+
 function getLocalData(): { bills: Bill[]; sightings: Sighting[] } {
   try {
     const billsRaw = localStorage.getItem(LOCAL_STORAGE_BILLS_KEY);
@@ -295,7 +315,16 @@ export async function registerBillSighting(
         };
 
         txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
-        txn.set(rateLimitRef, nextRateLimitData(currentRateLimit, billId, sightingDocRef.id));
+        const rateLimitData = nextRateLimitData(currentRateLimit, billId, sightingDocRef.id);
+        logRegistrationTransactionDebug({
+          uid,
+          billId,
+          sightingId: sightingDocRef.id,
+          rateLimitPath: rateLimitRef.path,
+          rateLimitWrite: rateLimitSnap.exists() ? 'update' : 'create',
+          rateLimitData,
+        });
+        txn.set(rateLimitRef, rateLimitData);
 
         const finalBill: Bill = {
           ...currentBill,
@@ -361,7 +390,16 @@ export async function registerBillSighting(
         };
 
         txn.set(sightingDocRef, sanitizeFirestoreData(newSighting));
-        txn.set(rateLimitRef, nextRateLimitData(currentRateLimit, billId, sightingDocRef.id));
+        const rateLimitData = nextRateLimitData(currentRateLimit, billId, sightingDocRef.id);
+        logRegistrationTransactionDebug({
+          uid,
+          billId,
+          sightingId: sightingDocRef.id,
+          rateLimitPath: rateLimitRef.path,
+          rateLimitWrite: rateLimitSnap.exists() ? 'update' : 'create',
+          rateLimitData,
+        });
+        txn.set(rateLimitRef, rateLimitData);
 
         return {
           isRediscovery: false,

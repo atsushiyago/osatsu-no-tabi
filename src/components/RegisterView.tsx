@@ -383,22 +383,20 @@ export const RegisterView = ({
         return;
       }
       const rawMsg = err?.message || '';
-      const isInternalFirebaseError =
-        rawMsg.includes('Missing or insufficient') ||
-        rawMsg.includes('permission-denied') ||
-        rawMsg.includes('PERMISSION_DENIED') ||
-        rawMsg.includes('unavailable') ||
-        err?.code === 'permission-denied';
+      const rawCode = typeof err?.code === 'string' ? err.code : '';
+      const errorCode = rawCode.split('/').at(-1) ?? '';
+      if (errorCode) console.error('Firebase registration error detail:', { code: rawCode, message: rawMsg });
 
-      if (isInternalFirebaseError) {
-        if (billForSubmit && err?.code === 'permission-denied') {
-          const remainingMs = getCooldownRemainingMs(billForSubmit);
-          setErrorMessage(remainingMs > 0
-            ? cooldownMessage(remainingMs)
-            : 'このお札の再登録を受け付けられませんでした。少し時間をあけてから、もう一度お試しください。');
-        } else {
-          setErrorMessage('登録できませんでした。通信環境をご確認のうえ、しばらくしてからもう一度お試しください。');
-        }
+      if (errorCode === 'permission-denied') {
+        setErrorMessage('登録処理が許可されませんでした。しばらくしてからもう一度お試しください。');
+      } else if (errorCode === 'unauthenticated') {
+        setErrorMessage('認証の準備が完了していません。ページを再読み込みしてもう一度お試しください。');
+      } else if (errorCode === 'unavailable' || errorCode === 'deadline-exceeded') {
+        setErrorMessage('通信環境をご確認のうえ、もう一度お試しください。');
+      } else if (errorCode === 'resource-exhausted') {
+        setErrorMessage('短時間に多くの登録が行われました。しばらく待ってからもう一度お試しください。');
+      } else if (rawMsg.includes('Missing or insufficient permissions')) {
+        setErrorMessage('登録処理が許可されませんでした。しばらくしてからもう一度お試しください。');
       } else {
         setErrorMessage(rawMsg || '登録中にエラーが発生しました。再度お試しください。');
       }
