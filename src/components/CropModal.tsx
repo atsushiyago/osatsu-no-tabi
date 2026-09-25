@@ -1,9 +1,22 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Check, X, Crop as CropIcon } from 'lucide-react';
 
+export interface CropMetadata {
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+  naturalWidth: number;
+  naturalHeight: number;
+  displayedWidth: number;
+  displayedHeight: number;
+  scaleX: number;
+  scaleY: number;
+}
+
 interface CropModalProps {
   imageFile: File;
-  onCrop: (croppedBlob: Blob) => void;
+  onCrop: (croppedBlob: Blob, metadata: CropMetadata) => void;
   onCancel: () => void;
 }
 
@@ -17,6 +30,14 @@ interface Rect {
 export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // 画像寸法情報
+  const [imageDimensions, setImageDimensions] = useState<{
+    naturalW: number;
+    naturalH: number;
+    displayedW: number;
+    displayedH: number;
+  } | null>(null);
 
   // 初期クロップ枠（中央付近、記番号に合わせた横長比率）
   const [crop, setCrop] = useState<Rect>({
@@ -45,6 +66,39 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
       URL.revokeObjectURL(url);
     };
   }, [imageFile]);
+
+  // 画像ロード完了時にサイズ測定
+  const handleImageLoad = () => {
+    if (!imgRef.current) return;
+    const img = imgRef.current;
+    const rect = img.getBoundingClientRect();
+    setImageDimensions({
+      naturalW: img.naturalWidth || img.width,
+      naturalH: img.naturalHeight || img.height,
+      displayedW: rect.width,
+      displayedH: rect.height,
+    });
+  };
+
+  // ウィンドウリサイズ時にも表示サイズを再取得
+  useEffect(() => {
+    const handleResize = () => {
+      if (imgRef.current) {
+        const img = imgRef.current;
+        const rect = img.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          setImageDimensions({
+            naturalW: img.naturalWidth || img.width,
+            naturalH: img.naturalHeight || img.height,
+            displayedW: rect.width,
+            displayedH: rect.height,
+          });
+        }
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // コンテナ座標に対するパーセンテージ計算
   const getRelativeCoords = useCallback((clientX: number, clientY: number) => {
@@ -147,13 +201,29 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
     if (!imgRef.current) return;
     const img = imgRef.current;
 
-    const naturalW = img.naturalWidth;
-    const naturalH = img.naturalHeight;
+    const naturalW = img.naturalWidth || img.width;
+    const naturalH = img.naturalHeight || img.height;
 
-    const cropX = Math.round((crop.x / 100) * naturalW);
-    const cropY = Math.round((crop.y / 100) * naturalH);
-    const cropW = Math.round((crop.w / 100) * naturalW);
-    const cropH = Math.round((crop.h / 100) * naturalH);
+    // 表示サイズ（コンテナ要素の実際のピクセルサイズ）
+    const rect = containerRef.current ? containerRef.current.getBoundingClientRect() : img.getBoundingClientRect();
+    const displayedW = rect.width > 0 ? rect.width : (imageDimensions?.displayedW || naturalW);
+    const displayedH = rect.height > 0 ? rect.height : (imageDimensions?.displayedH || naturalH);
+
+    // スケール係数
+    const scaleX = naturalW / displayedW;
+    const scaleY = naturalH / displayedH;
+
+    // 表示上のCSSピクセル座標
+    const cssX = (crop.x / 100) * displayedW;
+    const cssY = (crop.y / 100) * displayedH;
+    const cssW = (crop.w / 100) * displayedW;
+    const cssH = (crop.h / 100) * displayedH;
+
+    // 元画像のピクセル座標へ正確に変換し、画像境界内にクランプ
+    const cropX = Math.max(0, Math.min(naturalW - 1, Math.round(cssX * scaleX)));
+    const cropY = Math.max(0, Math.min(naturalH - 1, Math.round(cssY * scaleY)));
+    const cropW = Math.max(1, Math.min(naturalW - cropX, Math.round(cssW * scaleX)));
+    const cropH = Math.max(1, Math.min(naturalH - cropY, Math.round(cssH * scaleY)));
 
     if (cropW <= 0 || cropH <= 0) return;
 
@@ -164,12 +234,42 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // 白背景で塗りつぶし（透明化防止）
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cropW, cropH);
+
+    // 画像から切り出し描画
     ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    const metadata: CropMetadata = {
+      cropX,
+      cropY,
+      cropW,
+      cropH,
+      naturalWidth: naturalW,
+      naturalHeight: naturalH,
+      displayedWidth: Math.round(displayedW),
+      displayedHeight: Math.round(displayedH),
+      scaleX,
+      scaleY,
+    };
+
+    const isDebugTiming = typeof window !== 'undefined' && window.location.search.includes('debug=timing');
+    if (isDebugTiming) {
+      console.log(
+        '%c[Crop Metadata] ' +
+        `Natural: ${naturalW}x${naturalH} | ` +
+        `Displayed: ${displayedW.toFixed(0)}x${displayedH.toFixed(0)} | ` +
+        `Scale: ${scaleX.toFixed(3)}x${scaleY.toFixed(3)} | ` +
+        `Crop: (${cropX}, ${cropY}) ${cropW}x${cropH}`,
+        'background: #0284c7; color: #fff; font-family: monospace; font-size: 11px; padding: 2px 4px;'
+      );
+    }
 
     canvas.toBlob(
       (blob) => {
         if (blob) {
-          onCrop(blob);
+          onCrop(blob, metadata);
         }
       },
       'image/jpeg',
@@ -184,7 +284,7 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
         zIndex: 9999,
         display: 'flex',
         flexDirection: 'column',
@@ -228,11 +328,13 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
             maxWidth: '100%',
             maxHeight: '100%',
             touchAction: 'none',
+            lineHeight: 0,
           }}
         >
           <img
             ref={imgRef}
             src={imageUrl}
+            onLoad={handleImageLoad}
             alt="撮影画像プレビュー"
             style={{
               display: 'block',

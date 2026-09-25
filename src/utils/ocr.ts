@@ -268,11 +268,97 @@ function calculateOtsuThreshold(grayData: Uint8ClampedArray): number {
 }
 
 /**
+ * 画像ピクセル統計情報
+ */
+export interface ImagePixelStats {
+  width: number;
+  height: number;
+  minLum: number;
+  maxLum: number;
+  avgLum: number;
+  transparentRatio: string;
+}
+
+/**
+ * ImageData のピクセル統計を解析（最小/最大/平均輝度、透明ピクセル率）
+ */
+export function analyzeImageData(imageData: ImageData): ImagePixelStats {
+  const data = imageData.data;
+  const totalPixels = data.length / 4;
+  let minLum = 255;
+  let maxLum = 0;
+  let sumLum = 0;
+  let transparentCount = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+
+    if (a < 10) {
+      transparentCount++;
+    }
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (lum < minLum) minLum = lum;
+    if (lum > maxLum) maxLum = lum;
+    sumLum += lum;
+  }
+
+  return {
+    width: imageData.width,
+    height: imageData.height,
+    minLum: totalPixels === 0 ? 0 : Math.round(minLum),
+    maxLum: totalPixels === 0 ? 0 : Math.round(maxLum),
+    avgLum: totalPixels === 0 ? 0 : Math.round(sumLum / totalPixels),
+    transparentRatio: totalPixels === 0 ? '0%' : ((transparentCount / totalPixels) * 100).toFixed(1) + '%',
+  };
+}
+
+/**
+ * Blob から ImagePixelStats を解析する補助関数
+ */
+export async function analyzeBlobStats(blob: Blob): Promise<ImagePixelStats> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve({
+          width: canvas.width,
+          height: canvas.height,
+          minLum: 0,
+          maxLum: 0,
+          avgLum: 0,
+          transparentRatio: '0%',
+        });
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      resolve(analyzeImageData(imgData));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: 0, height: 0, minLum: 0, maxLum: 0, avgLum: 0, transparentRatio: '100%' });
+    };
+    img.src = url;
+  });
+}
+
+/**
  * 前処理パターンの種類
  */
 export interface PreprocessedPass {
   name: string;
   blob: Blob;
+  previewUrl: string;
+  stats: ImagePixelStats;
 }
 
 /**
@@ -295,7 +381,6 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
         const srcH = img.naturalHeight || img.height;
 
         // 記番号の文字高さをOCRに十分な解像度（高さ80〜120px程度）にスケールアップ
-        // クロップされた記番号部分の短辺が小さい場合、2〜3倍アップスケールする
         let scale = 1.0;
         if (srcH < 70) {
           scale = Math.min(3.0, 100 / Math.max(1, srcH));
@@ -321,10 +406,17 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
           return;
         }
 
+        // 白背景で塗りつぶし（透明ピクセルによる誤認識防止）
+        baseCtx.fillStyle = '#ffffff';
+        baseCtx.fillRect(0, 0, width, height);
+
         // 高品質スムージングで拡大描画
         baseCtx.imageSmoothingEnabled = true;
         baseCtx.imageSmoothingQuality = 'high';
         baseCtx.drawImage(img, 0, 0, width, height);
+
+        const baseImgData = baseCtx.getImageData(0, 0, width, height);
+        const statsOriginal = analyzeImageData(baseImgData);
 
         // --- パス 1: 原画像（アップスケールのみ） ---
         const blobOriginal = await new Promise<Blob>((res, rej) => {
@@ -350,6 +442,7 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
           data2[i + 2] = adjusted;
         }
         contrastCtx.putImageData(imgData2, 0, 0);
+        const statsContrast = analyzeImageData(imgData2);
 
         const blobContrast = await new Promise<Blob>((res, rej) => {
           contrastCanvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.95);
@@ -384,15 +477,31 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
           data3[i + 2] = val;
         }
         binarizedCtx.putImageData(imgData3, 0, 0);
+        const statsBinarized = analyzeImageData(imgData3);
 
         const blobBinarized = await new Promise<Blob>((res, rej) => {
           binarizedCanvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/jpeg', 0.95);
         });
 
         resolve([
-          { name: 'Original (Upscaled)', blob: blobOriginal },
-          { name: 'Contrast Enhanced', blob: blobContrast },
-          { name: 'Otsu Binarized', blob: blobBinarized },
+          {
+            name: 'Original (Upscaled)',
+            blob: blobOriginal,
+            previewUrl: URL.createObjectURL(blobOriginal),
+            stats: statsOriginal,
+          },
+          {
+            name: 'Contrast Enhanced',
+            blob: blobContrast,
+            previewUrl: URL.createObjectURL(blobContrast),
+            stats: statsContrast,
+          },
+          {
+            name: 'Otsu Binarized',
+            blob: blobBinarized,
+            previewUrl: URL.createObjectURL(blobBinarized),
+            stats: statsBinarized,
+          },
         ]);
       } catch (err) {
         reject(err);
@@ -417,7 +526,8 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
  */
 export async function recognizeBanknoteSerialFromImage(
   imageFileOrBlob: Blob | File,
-  onProgress?: (status: string) => void
+  onProgress?: (status: string) => void,
+  onPassesReady?: (passes: PreprocessedPass[]) => void
 ): Promise<string[]> {
   const isDebugTiming =
     typeof window !== 'undefined' &&
@@ -442,8 +552,17 @@ export async function recognizeBanknoteSerialFromImage(
     passes = await generatePreprocessedPasses(imageFileOrBlob);
   } catch (err) {
     console.warn('Preprocessing passes failed, fallback to single pass:', err);
-    passes = [{ name: 'Raw Input', blob: imageFileOrBlob }];
+    passes = [
+      {
+        name: 'Raw Input',
+        blob: imageFileOrBlob,
+        previewUrl: URL.createObjectURL(imageFileOrBlob),
+        stats: { width: 0, height: 0, minLum: 0, maxLum: 0, avgLum: 0, transparentRatio: '0%' },
+      },
+    ];
   }
+
+  onPassesReady?.(passes);
 
   onProgress?.('記番号を認識中...');
 
@@ -475,7 +594,10 @@ export async function recognizeBanknoteSerialFromImage(
       if (isDebugTiming) {
         console.log(
           `%c[OCR Pass ${i + 1}: ${pass.name}] ` +
-          `Time: ${passDuration.toFixed(0)}ms | Confidence: ${confidence.toFixed(1)}% | ` +
+          `Time: ${passDuration.toFixed(0)}ms | Conf: ${confidence.toFixed(1)}% | ` +
+          `Size: ${pass.stats.width}x${pass.stats.height} | ` +
+          `Lum(min/max/avg): ${pass.stats.minLum}/${pass.stats.maxLum}/${pass.stats.avgLum} | ` +
+          `Trans: ${pass.stats.transparentRatio} | ` +
           `Raw: "${rawText.replace(/[\r\n]+/g, ' ').trim()}" | ` +
           `Candidates: [${passCandidates.join(', ')}]`,
           'background: #1e293b; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 2px 4px;'

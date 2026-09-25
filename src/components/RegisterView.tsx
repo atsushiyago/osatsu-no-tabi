@@ -11,8 +11,9 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
-import { recognizeBanknoteSerialFromImage } from '../utils/ocr.ts';
-import { CropModal } from './CropModal';
+import { recognizeBanknoteSerialFromImage, analyzeBlobStats, type PreprocessedPass } from '../utils/ocr.ts';
+import { CropModal, type CropMetadata } from './CropModal';
+import { OcrDebugPanel, type OcrDebugData } from './OcrDebugPanel';
 import {
   PREFECTURES,
   getCitiesByPrefecture,
@@ -57,6 +58,7 @@ export const RegisterView = ({
   // OCR機能関連 state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const rawFileRef = useRef<File | null>(null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrStatusMessage, setOcrStatusMessage] = useState<string | null>(null);
   const [ocrCandidates, setOcrCandidates] = useState<string[]>([]);
@@ -65,6 +67,13 @@ export const RegisterView = ({
     text: string;
   } | null>(null);
 
+  // ?debug=timing 用の画像診断データ
+  const [ocrDebugData, setOcrDebugData] = useState<OcrDebugData | null>(null);
+  const isTimingDebug =
+    typeof window !== 'undefined' &&
+    window.location &&
+    window.location.search.includes('debug=timing');
+
   const handleTriggerOcr = () => {
     if (isOcrProcessing) return;
     fileInputRef.current?.click();
@@ -72,26 +81,57 @@ export const RegisterView = ({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    // 同一ファイルを再度選択した場合にも onChange が発火するようクリア
     e.target.value = '';
 
     if (!file) return;
 
+    rawFileRef.current = file;
     // 撮影/選択後、まずクロップモーダルを開いてユーザーに記番号領域を指定してもらう
     setPendingImageFile(file);
   };
 
-  const handleCropComplete = async (croppedBlob: Blob) => {
+  const handleCropComplete = async (croppedBlob: Blob, metadata: CropMetadata) => {
     setPendingImageFile(null);
     setIsOcrProcessing(true);
     setOcrStatusMessage('記番号を読み取っています…');
     setOcrMessage(null);
     setOcrCandidates([]);
 
+    const rawFile = rawFileRef.current;
+
     try {
-      const candidates = await recognizeBanknoteSerialFromImage(croppedBlob, (msg) => {
-        setOcrStatusMessage(msg);
-      });
+      let generatedPasses: PreprocessedPass[] = [];
+
+      const candidates = await recognizeBanknoteSerialFromImage(
+        croppedBlob,
+        (msg) => {
+          setOcrStatusMessage(msg);
+        },
+        (passes) => {
+          generatedPasses = passes;
+        }
+      );
+
+      // debug=timing の場合、画像診断情報を構築
+      if (isTimingDebug && rawFile) {
+        try {
+          const [rawStats, croppedStats] = await Promise.all([
+            analyzeBlobStats(rawFile),
+            analyzeBlobStats(croppedBlob),
+          ]);
+          setOcrDebugData({
+            rawImageUrl: URL.createObjectURL(rawFile),
+            rawImageFile: rawFile,
+            rawStats,
+            cropMetadata: metadata,
+            croppedImageUrl: URL.createObjectURL(croppedBlob),
+            croppedStats,
+            passes: generatedPasses,
+          });
+        } catch (dbgErr) {
+          console.warn('Failed to build debug diagnostics:', dbgErr);
+        }
+      }
 
       if (candidates.length === 1) {
         setSerialInput(candidates[0]);
@@ -758,6 +798,11 @@ export const RegisterView = ({
           onCrop={handleCropComplete}
           onCancel={handleCropCancel}
         />
+      )}
+
+      {/* ?debug=timing 時の画像パイプライン診断パネル */}
+      {isTimingDebug && ocrDebugData && (
+        <OcrDebugPanel data={ocrDebugData} />
       )}
     </div>
   );
