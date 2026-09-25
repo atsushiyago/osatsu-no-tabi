@@ -32,28 +32,25 @@ service cloud.firestore {
         && data.id == billId
         && data.serialNumber == billId
         && data.serialNumber.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
-        
+
         // 額面は 1000円 / 5000円 / 10000円 のいずれか
         && data.denomination in [1000, 5000, 10000]
-        
+
         // 初回登録時の初期値
         && data.sightingsCount == 1
         && data.totalDistanceKm == 0
-        
+
         // 日時フィールド（ISO8601文字列）の検証
         && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
         && data.updatedAt is string && data.updatedAt.size() >= 19 && data.updatedAt.size() <= 32
         && data.firstSightedAt is string && data.firstSightedAt.size() >= 19 && data.firstSightedAt.size() <= 32
         && data.lastSightedAt is string && data.lastSightedAt.size() >= 19 && data.lastSightedAt.size() <= 32
-        // 移行中は旧形式（時計なし）も許可する。新形式はサーバー時刻を必須検証する。
-        && ((!('lastSightedAtServer' in data)
-              && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
-              && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt']))
-          || ('lastSightedAtServer' in data
-              && data.lastSightedAtServer is timestamp
-              && data.lastSightedAtServer == request.time
-              && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
-              && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])));
+        // This field is assigned by serverTimestamp(); clients cannot choose its value.
+        && data.lastSightedAtServer is timestamp && data.lastSightedAtServer == request.time
+
+        // 未知フィールドの混入防止（必要な全9フィールドのみ許可）
+        && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
+        && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
     }
 
     function isValidBillUpdate() {
@@ -68,52 +65,33 @@ service cloud.firestore {
         && next.createdAt == current.createdAt
         && next.firstSightedAt == current.firstSightedAt;
 
-      let validRediscoveryBase =
+      let validRediscovery =
         // 発見回数は現在値 + 1 のみ許可（ジャンプや減少を防止）
         next.sightingsCount == current.sightingsCount + 1
-        
+
         // 移動距離は減少不可かつ非負数
         && next.totalDistanceKm is number
         && next.totalDistanceKm >= current.totalDistanceKm
-        
+
         // 更新日時フィールドの検証
         && next.updatedAt is string && next.updatedAt.size() >= 19 && next.updatedAt.size() <= 32
         && next.lastSightedAt is string && next.lastSightedAt.size() >= 19 && next.lastSightedAt.size() <= 32
-        ;
-
-      let newClientRediscovery =
-        'lastSightedAtServer' in current
-        && 'lastSightedAtServer' in next
+        && current.lastSightedAtServer is timestamp
         && next.lastSightedAtServer is timestamp
         && next.lastSightedAtServer == request.time
         && request.time >= current.lastSightedAtServer + duration.value(15, 'm')
+
+        // 未知フィールドの追加防止
         && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
         && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
 
-      // New-client initializer: add only the server clock. This starts the 15-minute window.
       let initializeLegacyCooldown =
         !('lastSightedAtServer' in current)
-        && 'lastSightedAtServer' in next
         && next.lastSightedAtServer is timestamp
         && next.lastSightedAtServer == request.time
         && next.diff(current).affectedKeys().hasOnly(['lastSightedAtServer']);
 
-      // Temporary migration compatibility: legacy writes do not update the server clock.
-      // The 15-minute cooldown cannot be fully guaranteed on this old-client path.
-      let legacyClientRediscovery =
-        validRediscoveryBase
-        && (!('lastSightedAtServer' in current)
-          ? !('lastSightedAtServer' in next)
-          : ('lastSightedAtServer' in next
-            && next.lastSightedAtServer == current.lastSightedAtServer
-            && !next.diff(current).affectedKeys().hasAny(['lastSightedAtServer'])))
-        && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt'])
-        && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
-
-      return immutableFields
-        && (initializeLegacyCooldown
-          || (validRediscoveryBase && newClientRediscovery)
-          || legacyClientRediscovery);
+      return immutableFields && (validRediscovery || initializeLegacyCooldown);
     }
 
     // ---------------------------------------------------------------
@@ -135,57 +113,40 @@ service cloud.firestore {
       let data = request.resource.data;
       let targetBillDoc = getAfter(/databases/$(database)/documents/bills/$(data.billId));
       let billPath = /databases/$(database)/documents/bills/$(data.billId);
-      let billBefore = get(billPath);
-      let hasBillBefore = exists(billPath);
-      let clockChanged = (!hasBillBefore && 'lastSightedAtServer' in targetBillDoc.data)
-        || (hasBillBefore
-          && targetBillDoc.data.diff(billBefore.data).affectedKeys().hasAny(['lastSightedAtServer']));
 
       return (
         // トランザクションコミット後に対応する bills/{billId} が存在すること
         existsAfter(/databases/$(database)/documents/bills/$(data.billId))
-        
+
         // トランザクション整合性: sightingのstepとbillのsightingsCountが完全に連動していること
         && data.step == targetBillDoc.data.sightingsCount
-        && ((!hasBillBefore && data.step == 1)
-          || (hasBillBefore && data.step == billBefore.data.sightingsCount + 1))
-        // New-client writes must advance the trusted server clock to request.time.
-        // The old-client compatibility branch keeps the clock unchanged (or absent);
-        // cooldown cannot be fully enforced for that temporary legacy path.
-        && ((clockChanged
-              && targetBillDoc.data.lastSightedAtServer is timestamp
-              && targetBillDoc.data.lastSightedAtServer == request.time)
-          || (!clockChanged
-              && ((!hasBillBefore && !('lastSightedAtServer' in targetBillDoc.data))
-                || (hasBillBefore
-                  && ((!('lastSightedAtServer' in billBefore.data) && !('lastSightedAtServer' in targetBillDoc.data))
-                    || ('lastSightedAtServer' in billBefore.data
-                      && 'lastSightedAtServer' in targetBillDoc.data
-                      && targetBillDoc.data.lastSightedAtServer == billBefore.data.lastSightedAtServer))))))
-        
+        && targetBillDoc.data.lastSightedAtServer == request.time
+        && ((!exists(billPath) && data.step == 1)
+          || (exists(billPath) && data.step == get(billPath).data.sightingsCount + 1))
+
         // 基本フィールド型とフォーマット
         && data.id is string
         && data.billId is string && data.billId.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
         && data.step is int && data.step >= 1
-        
+
         // 地域（市区町村レベル）
         && data.prefecture is string && data.prefecture.size() >= 2 && data.prefecture.size() <= 10
         && data.municipality is string && data.municipality.size() >= 1 && data.municipality.size() <= 50
-        
+
         // 概算座標範囲（世界標準範囲）
         && data.latitudeApprox is number && data.latitudeApprox >= -90.0 && data.latitudeApprox <= 90.0
         && data.longitudeApprox is number && data.longitudeApprox >= -180.0 && data.longitudeApprox <= 180.0
-        
+
         // 移動・経過メトリクス（非負数）
         && data.distanceFromPrevKm is number && data.distanceFromPrevKm >= 0
         && data.daysFromPrev is number && data.daysFromPrev >= 0
-        
+
         // 日時文字列（ISO8601）
         && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
-        
+
         // 旅メモ（任意入力・最大100文字）
         && (!('userNote' in data) || (data.userNote is string && data.userNote.size() <= 100))
-        
+
         // フィールドキーの完全一致
         && data.keys().hasAll(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
         && data.keys().hasOnly(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])

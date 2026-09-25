@@ -117,6 +117,74 @@ async function runTests() {
     });
   });
 
+  const oldClientBillId = 'GH123456A';
+  const oldClientBillRef = doc(db, 'bills', oldClientBillId);
+  const oldClientSighting1 = doc(collection(db, 'sightings'));
+  await assertPass('旧client形式の新規登録 (server clockなし)', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.set(oldClientBillRef, {
+        id: oldClientBillId, serialNumber: oldClientBillId, denomination: 1000,
+        createdAt: nowIso, updatedAt: nowIso, sightingsCount: 1,
+        totalDistanceKm: 0, firstSightedAt: nowIso, lastSightedAt: nowIso,
+      });
+      txn.set(oldClientSighting1, {
+        id: oldClientSighting1.id, billId: oldClientBillId, step: 1,
+        prefecture: '北海道', municipality: '札幌市', latitudeApprox: 43.0618,
+        longitudeApprox: 141.3545, createdAt: nowIso, distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
+    });
+  });
+
+  const oldClientSighting2 = doc(collection(db, 'sightings'));
+  await assertPass('旧client形式の再発見 (server clockなし)', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(oldClientBillRef, {
+        updatedAt: new Date().toISOString(), sightingsCount: 2,
+        totalDistanceKm: 0, lastSightedAt: new Date().toISOString(),
+      });
+      txn.set(oldClientSighting2, {
+        id: oldClientSighting2.id, billId: oldClientBillId, step: 2,
+        prefecture: '東京都', municipality: '新宿区', latitudeApprox: 35.6938,
+        longitudeApprox: 139.7034, createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
+    });
+  });
+
+  const oldClientOnNewBillId = 'JK123456A';
+  const oldClientOnNewBillRef = doc(db, 'bills', oldClientOnNewBillId);
+  const newBillSeedSighting = doc(collection(db, 'sightings'));
+  await assertPass('新client形式の新規登録', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.set(oldClientOnNewBillRef, {
+        id: oldClientOnNewBillId, serialNumber: oldClientOnNewBillId, denomination: 1000,
+        createdAt: nowIso, updatedAt: nowIso, sightingsCount: 1,
+        totalDistanceKm: 0, firstSightedAt: nowIso, lastSightedAt: nowIso,
+        lastSightedAtServer: serverTimestamp(),
+      });
+      txn.set(newBillSeedSighting, {
+        id: newBillSeedSighting.id, billId: oldClientOnNewBillId, step: 1,
+        prefecture: '東京都', municipality: '千代田区', latitudeApprox: 35.6938,
+        longitudeApprox: 139.7532, createdAt: nowIso, distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
+    });
+  });
+  const oldClientOnNewBillSighting = doc(collection(db, 'sightings'));
+  await assertPass('旧clientは移行済みbillの時計を保持したまま再発見できる', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(oldClientOnNewBillRef, {
+        updatedAt: new Date().toISOString(), sightingsCount: 2,
+        totalDistanceKm: 0, lastSightedAt: new Date().toISOString(),
+      });
+      txn.set(oldClientOnNewBillSighting, {
+        id: oldClientOnNewBillSighting.id, billId: oldClientOnNewBillId, step: 2,
+        prefecture: '東京都', municipality: '港区', latitudeApprox: 35.6581,
+        longitudeApprox: 139.7516, createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
+    });
+  });
+
   const otherBillId = 'CD654321A';
   const otherBillRef = doc(db, 'bills', otherBillId);
   const otherSightingRef = doc(collection(db, 'sightings'));
@@ -146,13 +214,20 @@ async function runTests() {
       txn.update(legacyBillRef, { lastSightedAtServer: serverTimestamp() });
     });
   });
-  await assertReject('legacy bill移行後も15分以内の再投稿は拒否', async () => {
-    await updateDoc(legacyBillRef, {
-      updatedAt: new Date().toISOString(),
-      sightingsCount: 2,
-      totalDistanceKm: 0,
-      lastSightedAt: new Date().toISOString(),
-      lastSightedAtServer: serverTimestamp(),
+  await assertReject('legacy bill移行後の新client再発見は15分以内なら拒否', async () => {
+    const migrationSight = doc(collection(db, 'sightings'));
+    await runTransaction(db, async (txn) => {
+      txn.update(legacyBillRef, {
+        updatedAt: new Date().toISOString(), sightingsCount: 2,
+        totalDistanceKm: 0, lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: serverTimestamp(),
+      });
+      txn.set(migrationSight, {
+        id: migrationSight.id, billId: legacyBillId, step: 2,
+        prefecture: '東京都', municipality: '新宿区', latitudeApprox: 35.6938,
+        longitudeApprox: 139.7034, createdAt: new Date().toISOString(),
+        distanceFromPrevKm: 0, daysFromPrev: 0,
+      });
     });
   });
 
@@ -391,6 +466,31 @@ async function runTests() {
         firstSightedAt: nowIso,
         lastSightedAt: nowIso,
         unknownFieldHacked: true,
+      });
+    });
+  });
+
+  await assertReject('新client形式のbillへの未知フィールド追加の拒否', async () => {
+    const newUnknownFieldRef = doc(db, 'bills', 'LM334455A');
+    await runTransaction(db, async (txn) => {
+      txn.set(newUnknownFieldRef, {
+        id: 'LM334455A', serialNumber: 'LM334455A', denomination: 1000,
+        createdAt: nowIso, updatedAt: nowIso, sightingsCount: 1,
+        totalDistanceKm: 0, firstSightedAt: nowIso, lastSightedAt: nowIso,
+        lastSightedAtServer: serverTimestamp(), unknownFieldHacked: true,
+      });
+    });
+  });
+
+  await assertReject('新client形式でもimmutable fieldのserialNumber改ざんを拒否', async () => {
+    await runTransaction(db, async (txn) => {
+      txn.update(oldClientOnNewBillRef, {
+        serialNumber: 'HA111111H',
+        updatedAt: new Date().toISOString(),
+        sightingsCount: 3,
+        totalDistanceKm: 0,
+        lastSightedAt: new Date().toISOString(),
+        lastSightedAtServer: serverTimestamp(),
       });
     });
   });

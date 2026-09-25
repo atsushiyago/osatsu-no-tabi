@@ -99,7 +99,8 @@ VITE_FIREBASE_APP_ID=1:1234567890:web:...
   sightingsCount: number,   // 発見回数 (1, 2, 3...)
   totalDistanceKm: number,  // 累計移動距離 (km)
   firstSightedAt: string,   // 最初の発見日時
-  lastSightedAt: string     // 最新の発見日時
+  lastSightedAt: string,    // 最新の発見日時（表示用ISO8601）
+  lastSightedAtServer?: Timestamp // クールダウン判定用。移行中は旧billでは未設定の場合がある
 }
 ```
 
@@ -135,8 +136,9 @@ VITE_FIREBASE_APP_ID=1:1234567890:web:...
 2. **紙幣画像の非保存**
    - 本サービスでは紙幣の写真や画像データをサーバーにアップロード・保存しません。
 3. **いたずら・連投抑制**
-   - 同一端末から同一記番号の短時間（15分以内）の重複送信をクライアント側でブロック。
-   - サービス層（`billService.ts`）に抽象化レイヤーを設けており、将来的にFirebase AuthやCloud FunctionsでのRate Limit、App Check (reCAPTCHA Enterprise)、記番号のSHA-256ハッシュ化をシームレスに差し替え可能です。
+   - 新クライアントはFirestore Security Rulesで同一紙幣の再発見を15分制限し、別の紙幣は制限しません。
+   - 移行期間中の旧クライアント互換Rules経路では15分制限を完全には保証できません。移行完了後はstrict Rulesへ切り替えてください。
+   - App Check (reCAPTCHA Enterprise) とFirestore Security Rulesを併用します。
 4. **紙幣への書き込み厳禁の明示**
    - 米国等で見られるお札へのURLスタンプや落書きを明確に禁止し、自然な流通を観察する市民科学プロジェクトとしての健全性を維持します。
 
@@ -221,6 +223,21 @@ npx wrangler login
 npm run deploy
 ```
 （`npm run build && wrangler deploy` が実行され、`dist/` ディレクトリがCloudflare Workers Static Assetsとして即座に公開されます。）
+
+### Firestore Rulesの段階移行
+
+`firebase.json` は移行用の互換Rules（`firestore.rules`）を指しています。`firestore.strict.rules` は旧クライアント互換分岐を含まない最終版で、`firebase.strict.json` から個別にデプロイできます。
+
+1. **Phase 1 — 互換RulesのみFirebaseへdeploy**
+   - `firebase deploy --only firestore:rules --project <Firebase project ID>`
+   - 旧クライアント形式（`lastSightedAtServer`なし）と新クライアント形式の両方を許容します。旧クライアント経路では15分制限を完全には保証できません。
+2. **Phase 2 — 新frontendをCloudflareへdeploy**
+   - `npm run deploy`
+3. **Phase 3 — iPhone / Android / Macで確認**
+   - 新規登録、再発見、同じ紙幣の15分制限、別の紙幣の連続登録を確認します。
+4. **Phase 4 — 移行期間終了後strict Rulesへ切り替え**
+   - 旧クライアントの利用がなくなったことを確認してから、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
+   - これにより `firestore.strict.rules` が本番Rulesになります。strict版は時計フィールドのないbillを旧形式として再発見させません。既存billは新frontendによる時計初期化後、15分待って再発見できます。
 
 ---
 
