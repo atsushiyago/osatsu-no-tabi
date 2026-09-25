@@ -1,5 +1,5 @@
 import type { CropMetadata } from './CropModal';
-import type { ImagePixelStats, PreprocessedPass } from '../utils/ocr';
+import type { ImagePixelStats, PreprocessedPass, SyntheticOcrResult } from '../utils/ocr';
 
 export interface OcrDebugData {
   rawImageUrl: string;
@@ -10,6 +10,8 @@ export interface OcrDebugData {
   croppedStats?: ImagePixelStats;
   passes: PreprocessedPass[];
   error?: { pass: string; message: string; code?: string };
+  syntheticResult?: SyntheticOcrResult;
+  banknoteFound?: boolean;
 }
 
 interface OcrDebugPanelProps {
@@ -17,7 +19,7 @@ interface OcrDebugPanelProps {
 }
 
 export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
-  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error } = data;
+  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error, syntheticResult, banknoteFound } = data;
 
   const contrastPass = passes.find((p) => p.name.includes('Contrast'));
   const otsuPass = passes.find((p) => p.name.includes('Otsu'));
@@ -79,6 +81,25 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
       {error && (
         <div role="alert" style={{ marginBottom: '12px', padding: '8px 10px', background: '#7f1d1d', borderRadius: '6px', color: '#fee2e2' }}>
           OCR error ({error.pass}){error.code ? ` · code: ${error.code}` : ''}: {error.message}
+        </div>
+      )}
+
+      {syntheticResult && (
+        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', fontFamily: 'monospace', lineHeight: 1.6 }}>
+          <div style={{ color: '#38bdf8', fontWeight: 700 }}>Synthetic OCR: <span style={{ color: syntheticResult.passed ? '#4ade80' : '#f87171' }}>{syntheticResult.passed ? 'PASS' : 'FAIL'}</span></div>
+          <div>raw text: <strong>{syntheticResult.rawText || '(empty)'}</strong></div>
+          <div>confidence: <strong>{syntheticResult.confidence.toFixed(1)}%</strong></div>
+          <div>processing time: <strong>{syntheticResult.durationMs.toFixed(0)} ms</strong></div>
+          {syntheticResult.error && <div style={{ color: '#fca5a5' }}>error: {syntheticResult.error}</div>}
+          {syntheticResult.passed && banknoteFound === false && (
+            <div style={{ marginTop: '6px', color: '#fbbf24' }}>Synthetic PASS / Banknote FAIL → Tesseract基本動作は正常。紙幣画像認識条件を次に調査します。</div>
+          )}
+          {!syntheticResult.passed && (
+            <div style={{ marginTop: '6px', color: '#fca5a5' }}>Synthetic FAIL → Tesseract worker / 設定 / 入力経路を次に調査します。</div>
+          )}
+          {syntheticResult.passed && banknoteFound === true && (
+            <div style={{ marginTop: '6px', color: '#4ade80' }}>Synthetic PASS / Banknote PASS</div>
+          )}
         </div>
       )}
 

@@ -362,6 +362,14 @@ export interface PreprocessedPass {
   stats: ImagePixelStats;
 }
 
+export interface SyntheticOcrResult {
+  rawText: string;
+  confidence: number;
+  durationMs: number;
+  passed: boolean;
+  error?: string;
+}
+
 /**
  * 画像をOCRに最適な文字サイズ（高さ80〜120px程度）になるよう必要に応じてアップスケールし、
  * 以下の3種類の前処理パターンを生成する:
@@ -529,7 +537,9 @@ export async function recognizeBanknoteSerialFromImage(
   imageFileOrBlob: Blob | File,
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
-  onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void
+  onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
+  onSyntheticResult?: (result: SyntheticOcrResult) => void,
+  onBanknoteResult?: (found: boolean) => void
 ): Promise<string[]> {
   const debugTiming = isDebugTiming();
 
@@ -567,21 +577,84 @@ export async function recognizeBanknoteSerialFromImage(
 
   let worker: any = null;
   const allCandidateSerials = new Map<string, { serial: string; maxConfidence: number; sourcePass: string }>();
+  const reportSyntheticFailure = (message: string) => {
+    const result: SyntheticOcrResult = { rawText: '', confidence: 0, durationMs: 0, passed: false, error: message };
+    onSyntheticResult?.(result);
+    console.log(`[OCR Debug] synthetic raw="" confidence=0.0% time=0ms result=FAIL message=${message}`);
+  };
 
   try {
     try {
-      worker = await createWorker('eng');
+      worker = await createWorker('eng', 1, debugTiming ? {
+        logger: ({ status, progress }) => {
+          console.log(`[Tesseract] status=${status} progress=${Math.round(progress * 100)}%`);
+        },
+        errorHandler: (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[Tesseract] worker error: ${message}`);
+        },
+      } : {});
     } catch (err) {
       const error = err as Error & { code?: string };
       onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
+      if (debugTiming) reportSyntheticFailure(error.message || String(err));
       throw err;
     }
 
     // 1行の英数字列として認識 (PSM.SINGLE_LINE = 7)
-    await worker.setParameters({
-      tessedit_pageseg_mode: '7',
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
-    });
+    try {
+      await worker.setParameters({
+        tessedit_pageseg_mode: '7',
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      });
+    } catch (err) {
+      const error = err as Error & { code?: string };
+      onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
+      if (debugTiming) reportSyntheticFailure(error.message || String(err));
+      throw err;
+    }
+
+    if (debugTiming) {
+      let syntheticCanvas: HTMLCanvasElement | null = null;
+      try {
+        syntheticCanvas = document.createElement('canvas');
+        syntheticCanvas.width = 1000;
+        syntheticCanvas.height = 240;
+        const context = syntheticCanvas.getContext('2d');
+        if (!context) throw new Error('Canvas 2D context unavailable');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, syntheticCanvas.width, syntheticCanvas.height);
+        context.fillStyle = '#000000';
+        context.font = 'bold 112px Arial, sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('AB123456CD', syntheticCanvas.width / 2, syntheticCanvas.height / 2);
+
+        const syntheticBlob = await new Promise<Blob>((resolve, reject) => {
+          syntheticCanvas!.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Synthetic PNG encoding failed')), 'image/png');
+        });
+        const syntheticStart = performance.now();
+        onRecognizeEvent?.({ type: 'start', pass: 'Synthetic test' });
+        const syntheticRet = await worker.recognize(syntheticBlob);
+        onRecognizeEvent?.({ type: 'end', pass: 'Synthetic test' });
+        const rawText = syntheticRet.data.text || '';
+        const normalized = rawText.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const result: SyntheticOcrResult = {
+          rawText,
+          confidence: syntheticRet.data.confidence ?? 0,
+          durationMs: performance.now() - syntheticStart,
+          passed: normalized === 'AB123456CD',
+        };
+        onSyntheticResult?.(result);
+        console.log(`[OCR Debug] synthetic raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" confidence=${result.confidence.toFixed(1)}% time=${result.durationMs.toFixed(0)}ms result=${result.passed ? 'PASS' : 'FAIL'}`);
+      } catch (err) {
+        const error = err as Error;
+        onRecognizeEvent?.({ type: 'error', pass: 'Synthetic test', message: error.message || String(err) });
+        reportSyntheticFailure(error.message || String(err));
+      } finally {
+        syntheticCanvas = null;
+      }
+    }
 
     for (let i = 0; i < passes.length; i++) {
       const pass = passes[i];
@@ -642,7 +715,9 @@ export async function recognizeBanknoteSerialFromImage(
       (a, b) => b.maxConfidence - a.maxConfidence
     );
 
-    return sorted.slice(0, 3).map((item) => item.serial);
+    const candidates = sorted.slice(0, 3).map((item) => item.serial);
+    onBanknoteResult?.(candidates.length > 0);
+    return candidates;
   } finally {
     if (worker) {
       await worker.terminate();

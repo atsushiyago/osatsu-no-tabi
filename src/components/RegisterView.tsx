@@ -140,17 +140,27 @@ export const RegisterView = ({
         (event) => {
           if (!isTimingDebug) return;
           if (event.type === 'error') {
-            emittedOcrError = true;
             console.log(`[OCR Debug] recognizeError pass=${event.pass} message=${event.message || 'Unknown error'}`);
-            setOcrDebugData((current) => current ? {
-              ...current,
-              error: { pass: event.pass, message: event.message || 'Unknown error', code: event.code },
-            } : current);
+            if (event.pass !== 'Synthetic test') {
+              emittedOcrError = true;
+              setOcrDebugData((current) => current ? {
+                ...current,
+                error: { pass: event.pass, message: event.message || 'Unknown error', code: event.code },
+              } : current);
+            }
           } else if (event.type === 'start') {
             console.log(`[OCR Debug] recognizeStart pass=${event.pass}`);
           } else {
             console.log(`[OCR Debug] recognizeEnd pass=${event.pass}`);
           }
+        },
+        (result) => {
+          if (!isTimingDebug) return;
+          setOcrDebugData((current) => current ? { ...current, syntheticResult: result } : current);
+        },
+        (found) => {
+          if (!isTimingDebug) return;
+          setOcrDebugData((current) => current ? { ...current, banknoteFound: found } : current);
         }
       );
 
