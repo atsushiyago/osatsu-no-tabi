@@ -163,6 +163,60 @@ body {
   background-color: var(--primary-light);
 }
 
+.bottom-nav .nav-item { flex: 1; min-width: 0; padding-inline: 3px; }
+.bottom-nav .nav-item span { text-align: center; line-height: 1.2; }
+
+.tracked-bills-view, .tracked-bills-unavailable { padding-bottom: 20px; }
+.tracked-bills-view h1, .tracked-bills-unavailable h1 {
+  margin: 0 0 8px;
+  color: #25392f;
+  font-size: 22px;
+  font-weight: 800;
+}
+.tracked-bills-note, .tracked-bills-unavailable p {
+  margin: 0 0 18px;
+  color: #5d635d;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.tracked-bills-empty {
+  padding: 36px 20px;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  color: #555c55;
+  text-align: center;
+  background: #fffefa;
+}
+.tracked-bills-empty svg { color: #587260; }
+.tracked-bills-empty h2 { margin: 12px 0 6px; color: #303a32; font-size: 17px; }
+.tracked-bills-empty p { margin: 0; font-size: 14px; line-height: 1.5; }
+.tracked-bills-list { display: grid; gap: 10px; }
+.tracked-bill-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 15px;
+  border: 1px solid #dedbd1;
+  border-radius: 8px;
+  background: #fffefa;
+  color: #303a32;
+  text-align: left;
+  cursor: pointer;
+}
+.tracked-bill-card > svg { flex: 0 0 auto; color: #587260; }
+.tracked-bill-card-main { display: grid; gap: 4px; min-width: 0; font-size: 13px; line-height: 1.45; }
+.tracked-bill-card-main strong { font-family: monospace; font-size: 18px; letter-spacing: .04em; }
+.tracked-bills-warning {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff3db;
+  color: #744a16;
+  font-size: 13px;
+}
+
 /* ヒーローセクション */
 .hero {
   text-align: center;

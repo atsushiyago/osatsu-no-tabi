@@ -236,8 +236,31 @@ npm run deploy
 3. **Phase 3 — iPhone / Android / Macで確認**
    - 新規登録、再発見、同じ紙幣の15分制限、別の紙幣の連続登録を確認します。
 4. **Phase 4 — 移行期間終了後strict Rulesへ切り替え**
-   - 旧クライアントの利用がなくなったことを確認してから、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
-   - これにより `firestore.strict.rules` が本番Rulesになります。strict版は時計フィールドのないbillを旧形式として再発見させません。既存billは新frontendによる時計初期化後、15分待って再発見できます。
+   - 旧クライアントの利用がなくなり、新frontendの匿名AuthをiPhone / Android / Macで確認してから、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
+   - strict版ではbill/sighting書き込みにAuthを要求し、時計フィールドのないbillを旧形式のまま再発見させません。既存billは新frontendによる時計初期化後、15分待って再発見できます。
+
+### 匿名Authと「この端末で登録したお札」
+
+Firebase AuthenticationのAnonymous providerはFirebase Consoleで手動有効化してください。コードは既存Auth userを再利用し、未作成の場合だけ匿名userを作ります。Authが利用できなくても公開検索・閲覧と互換期間中の登録画面は引き続き開けます。「この端末で登録したお札」はAuth UIDがある場合だけ利用できます。
+
+個人用の一覧は `users/{uid}/trackedBills/{billId}` に `billId`, `createdAt`, `firstRegisteredByMe`, `notifyOnRediscovery` を保存します。自分が新しいbillを初回登録したtransactionの成功後にだけ記録し、検索や再発見登録では追加しません。Rulesは本人UIDに限定してread/writeを許可します。公開 `bills` / `sightings` にはUID、email、FCM tokenを保存しません。ブラウザデータ削除や端末変更では現状の一覧を引き継げません。将来は匿名userへGoogle等のcredentialをlinkする形で引き継ぎを検討できます。
+
+段階展開:
+
+1. Firebase ConsoleでAnonymous providerを有効にし、互換 `firestore.rules` をdeployします。これはprivate `users/{uid}/trackedBills` を本人だけに許可しますが、旧client互換期間の公開bill/sighting writeにはAuthを必須にしません。
+2. 新frontendをdeployします。匿名AuthとtrackedBillsだけを有効にし、public bill/sightingのデータ形式と書き込み互換性は維持します。
+3. iPhone / Android / Macで匿名UID取得、初回登録後の一覧追加、検索だけでは追加されないこと、詳細遷移、公開閲覧、15分制限を確認します。
+4. 旧clientが使われなくなったことを確認後、`firebase.strict.json` で `firestore.strict.rules` をdeployします。この段階でbill/sighting書き込みのAuth必須化とstrict 15分制限へ移行します。今回はRulesの本番deployは行いません。
+
+#### UID単位rate limit
+
+今回のRules + transactionだけのUID rate limitは実装せず、設計課題として残します。Firestore Rulesの `getAfter()` はtransaction/batch後の状態を見て関連writeを同時に要求でき、request.timeを使ったwindow start/countの検証も設計上は可能です。ただし公開write互換期間には未認証の旧client用経路が残り、そこからUIDカウンターを通らず投稿できるため、段階導入中に完全強制できません。将来実装する場合は認証済みclientのbill/sighting transactionに `rateLimits/{uid}` 更新を含め、Rulesで同じrequest.timeと回数上限を検証する案を、Rulesのdocument access call上限と実機transactionを含めて先にテストします。目安は10分に10件または1日に50件です。匿名アカウントを作り直せばUID単位制限は回避できるため、完全な荒らし防止にはなりません。App Check + Anonymous Auth + rate limitの多層防御として扱います。
+
+#### 将来の再発見通知
+
+`notifyOnRediscovery` は通知設定用の保存場所だけを用意し、今回は送信しません。将来はbill再発見時にCloud Functions Firestore triggerから対象userのtrackedBillsを参照して通知する案、またはcallable Functionで登録を受けてから処理する案を比較します。Callable FunctionsではFirebase Auth tokenとApp Check tokenを検証する構成にします。
+
+通知先はWeb Push、email、または両方を比較して決めます。Web PushはAndroid等でFirebase Cloud MessagingとService Workerを使う案があります。Appleの現行仕様ではiOS/iPadOS 16.4以降のWeb Pushはホーム画面に追加したWeb app向けです。そのためQRから一度だけアクセスする利用者に追加操作を求める負担を評価します。emailを導入する場合もemailはpublic bill dataへ置かず、private user dataまたは認証基盤側に保存します。今回はFCM、Service Worker、通知permission、Cloud Functions、email送信は実装していません。
 
 ---
 
@@ -404,7 +427,7 @@ OCRコードと診断UIは将来の再検討用に保持し、`?debug=timing` �
 - [x] **最近の旅のサンプル表示**: 固定のサンプル約45件をホームの最近の旅枠でのみ表示。実データより後に並べ、統計・Firestore・検索・地図には含めない。
 - [x] **同一紙幣の投稿クールダウン**: 同じ紙幣の再発見登録は15分以内を拒否。サーバーTimestampとFirestore Rulesで検証し、別の紙幣は制限しない。
 - [ ] **紙幣再発見通知**: 自分が登録したお札が他のユーザーに再発見された際のメール/Web Push通知。
-- [ ] **マイページ・旅するマイ紙幣一覧**: 自分が過去に登録したお札が現在どこまで旅をしているかの一覧。
+- [x] **この端末で登録したお札**: Anonymous Authとprivate trackedBillsを使った一覧を実装。通知送信は未実装。
 - [ ] **全国移動ヒートマップ**: 日本全国でお札がどのように流動しているかのマクロ動態マップ。
 - [ ] **ランキング機能**: 最長旅行距離ランキング、最長生存日数ランキング、都道府県別流入・流出統計。
 - [ ] **オープンデータ / 研究用途API**: 貨幣流通や地域経済の移動パターンの研究用匿名化オープンデータ提供。

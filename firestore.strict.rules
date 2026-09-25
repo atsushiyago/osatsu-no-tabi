@@ -15,10 +15,11 @@ service cloud.firestore {
       allow read: if true;
 
       // 新規紙幣の登録
-      allow create: if isValidNewBill(billId);
+      // Stage 2: require the anonymous Auth session after the new frontend is verified.
+      allow create: if request.auth != null && isValidNewBill(billId);
 
       // 既存紙幣の再発見（トランザクションによる集計値更新）
-      allow update: if isValidBillUpdate();
+      allow update: if request.auth != null && isValidBillUpdate();
 
       // 紙幣の削除は禁止
       allow delete: if false;
@@ -102,7 +103,7 @@ service cloud.firestore {
       allow read: if true;
 
       // 新規発見記録の登録
-      allow create: if isValidNewSighting();
+      allow create: if request.auth != null && isValidNewSighting();
 
       // 過去の発見記録の改ざん・削除は完全禁止
       allow update: if false;
@@ -151,6 +152,25 @@ service cloud.firestore {
         && data.keys().hasAll(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
         && data.keys().hasOnly(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])
       );
+    }
+
+    // Private per-browser/device state. Public bills and sightings never store a UID.
+    match /users/{uid}/trackedBills/{billId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
+        && request.resource.data.keys().hasOnly(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
+        && request.resource.data.billId == billId
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.firstRegisteredByMe == true
+        && request.resource.data.notifyOnRediscovery is bool;
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifyOnRediscovery'])
+        && request.resource.data.notifyOnRediscovery is bool;
+      allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
     // デフォルト: 他のコレクションへのアクセスは拒否

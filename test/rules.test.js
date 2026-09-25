@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import {
   getFirestore,
   connectFirestoreEmulator,
@@ -11,7 +12,9 @@ import {
   Timestamp,
   deleteDoc,
   updateDoc,
+  setDoc,
 } from 'firebase/firestore';
+import { getOrCreateAnonymousUser } from '../src/services/anonymousSession.js';
 
 const app = initializeApp({
   projectId: 'demo-george-rules-test',
@@ -20,6 +23,15 @@ const app = initializeApp({
 
 const db = getFirestore(app);
 connectFirestoreEmulator(db, '127.0.0.1', 8080);
+
+const authApp = initializeApp({
+  projectId: 'demo-george-rules-test',
+  apiKey: 'fake-api-key',
+}, 'anonymous-auth-test');
+const auth = getAuth(authApp);
+connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+const authenticatedDb = getFirestore(authApp);
+connectFirestoreEmulator(authenticatedDb, '127.0.0.1', 8080);
 
 let passedCount = 0;
 let failedCount = 0;
@@ -80,10 +92,37 @@ async function seedLegacyBillForTest(billId, isoTime) {
 async function runTests() {
   console.log('=== Firestore Security Rules 網羅テスト開始 ===\n');
 
+  const anonymousUser = await getOrCreateAnonymousUser(auth, signInAnonymously);
+  await assertPass('anonymous userを作成し、同じAuth sessionを再利用する', async () => {
+    const reused = await getOrCreateAnonymousUser(auth, async () => {
+      throw new Error('persisted anonymous user should be reused');
+    });
+    if (!anonymousUser.isAnonymous || reused.uid !== anonymousUser.uid) {
+      throw new Error('anonymous user was not reused');
+    }
+  });
+
   const nowIso = new Date().toISOString();
   const testBillId = 'AB123456C';
   const billRef = doc(db, 'bills', testBillId);
   const sightRef1 = doc(collection(db, 'sightings'));
+
+  await assertPass('未認証でも公開billをreadできる（Auth失敗時も公開閲覧可能）', async () => {
+    await getDoc(billRef);
+  });
+
+  const trackedRef = doc(authenticatedDb, 'users', anonymousUser.uid, 'trackedBills', testBillId);
+  await assertReject('他人のtrackedBillsをreadできない', async () => {
+    await getDoc(doc(authenticatedDb, 'users', 'another-user', 'trackedBills', testBillId));
+  });
+  await assertReject('他人のtrackedBillsを書き換えできない', async () => {
+    await setDoc(doc(authenticatedDb, 'users', 'another-user', 'trackedBills', testBillId), {
+      billId: testBillId,
+      createdAt: serverTimestamp(),
+      firstRegisteredByMe: true,
+      notifyOnRediscovery: false,
+    });
+  });
 
   // 1. 正常な新規登録トランザクション (新規bill + 第1足跡sighting)
   await assertPass('正常な新規登録トランザクション (bill + sighting step:1)', async () => {
@@ -115,6 +154,25 @@ async function runTests() {
         userNote: 'テスト登録',
       });
     });
+  });
+
+  await assertPass('自分のtrackedBillsを作成・read・更新でき（public billは変化しない）', async () => {
+    const publicBefore = (await getDoc(billRef)).data();
+    await setDoc(trackedRef, {
+      billId: testBillId,
+      createdAt: serverTimestamp(),
+      firstRegisteredByMe: true,
+      notifyOnRediscovery: false,
+    });
+    if (!(await getDoc(trackedRef)).exists()) throw new Error('own private tracked bill was not readable');
+    await updateDoc(trackedRef, { notifyOnRediscovery: true });
+    const publicAfter = (await getDoc(billRef)).data();
+    if (JSON.stringify(publicBefore) !== JSON.stringify(publicAfter)) {
+      throw new Error('private tracking changed public bill data');
+    }
+    if ('ownerUid' in publicAfter || 'email' in publicAfter || 'fcmToken' in publicAfter) {
+      throw new Error('private identity data leaked to public bill');
+    }
   });
 
   const oldClientBillId = 'GH123456A';

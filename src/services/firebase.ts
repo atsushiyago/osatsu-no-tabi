@@ -6,7 +6,9 @@ import {
   type AppCheck,
 } from 'firebase/app-check';
 import { initializeFirestore, type Firestore } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
 import { isDebugTiming } from '../utils/debug';
+import { getOrCreateAnonymousUser } from './anonymousSession.js';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -51,6 +53,7 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 let app: FirebaseApp | null = null;
 let appCheck: AppCheck | null = null;
 let db: Firestore | null = null;
+let auth: Auth | null = null;
 
 if (isFirebaseConfigured) {
   try {
@@ -112,6 +115,28 @@ if (isFirebaseConfigured) {
   }
 }
 
+// Auth initialization is isolated from Firestore/App Check so an Auth failure
+// never prevents public bill browsing or the existing registration flow.
+if (app) {
+  try {
+    auth = getAuth(app);
+  } catch (err) {
+    console.warn('Firebase Auth is unavailable; device bill list is disabled:', err);
+  }
+}
+
+export function ensureAnonymousUser(): Promise<User> {
+  if (!auth) return Promise.reject(new Error('Firebase Auth is unavailable'));
+  return getOrCreateAnonymousUser(auth, signInAnonymously);
+}
+
+export function observeAuthState(
+  next: (user: User | null) => void,
+  error: (reason: Error) => void
+): (() => void) | null {
+  return auth ? onAuthStateChanged(auth, next, error) : null;
+}
+
 /**
  * App Check 診断用関数
  * ?debug=timing が指定されている場合のみ実行され、
@@ -171,4 +196,4 @@ if (isDebugTiming() && appCheck) {
   runDiagnoseAppCheck();
 }
 
-export { app, appCheck, db };
+export { app, appCheck, auth, db };

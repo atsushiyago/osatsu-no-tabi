@@ -27,6 +27,7 @@ import {
   formatSerialDisplay,
 } from '../utils/serial';
 import { registerBillSighting, getBillBySerial, initializeLegacyBillCooldown } from '../services/billService';
+import { trackFirstRegisteredBill } from '../services/trackedBills';
 
 const BILL_COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -50,12 +51,14 @@ function cooldownMessage(remainingMs: number): string {
 
 interface RegisterViewProps {
   initialSerial?: string;
-  onSuccess: (result: RegisterResult) => void;
+  userUid?: string | null;
+  onSuccess: (result: RegisterResult, trackingFailed?: boolean) => void;
   onCancel: () => void;
 }
 
 export const RegisterView = ({
   initialSerial = '',
+  userUid,
   onSuccess,
   onCancel,
 }: RegisterViewProps) => {
@@ -355,7 +358,16 @@ export const RegisterView = ({
         userNote,
       });
 
-      onSuccess(result);
+      let trackingFailed = false;
+      if (!result.isRediscovery && userUid) {
+        try {
+          await trackFirstRegisteredBill(userUid, result.bill.id);
+        } catch (trackingError) {
+          console.warn('Bill registered publicly but could not be saved to this-device list:', trackingError);
+          trackingFailed = true;
+        }
+      }
+      onSuccess(result, trackingFailed);
     } catch (err: any) {
       console.error('Registration failed:', err);
       const rawMsg = err?.message || '';

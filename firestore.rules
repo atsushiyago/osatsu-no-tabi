@@ -192,6 +192,25 @@ service cloud.firestore {
       );
     }
 
+    // Private per-browser/device state. Public bills and sightings never store a UID.
+    match /users/{uid}/trackedBills/{billId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
+        && request.resource.data.keys().hasOnly(['billId', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery'])
+        && request.resource.data.billId == billId
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.firstRegisteredByMe == true
+        && request.resource.data.notifyOnRediscovery is bool;
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifyOnRediscovery'])
+        && request.resource.data.notifyOnRediscovery is bool;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     // デフォルト: 他のコレクションへのアクセスは拒否
     match /{document=**} {
       allow read, write: if false;

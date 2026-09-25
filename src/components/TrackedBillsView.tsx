@@ -1,0 +1,66 @@
+import { useEffect, useState } from 'react';
+import { ArrowRight, WalletCards } from 'lucide-react';
+import { getTrackedBills, type TrackedBillRow } from '../services/trackedBills';
+import { formatSerialDisplay } from '../utils/serial';
+
+interface TrackedBillsViewProps {
+  uid: string;
+  onSelectBill: (serial: string) => void;
+}
+
+export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
+  const [rows, setRows] = useState<TrackedBillRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getTrackedBills(uid)
+      .then((result) => { if (active) setRows(result); })
+      .catch((reason) => {
+        console.warn('Failed to load this-device tracked bills:', reason);
+        if (active) setError(true);
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [uid]);
+
+  return (
+    <section className="tracked-bills-view">
+      <h1>この端末で登録したお札</h1>
+      <p className="tracked-bills-note">
+        ブラウザのデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。
+      </p>
+      {loading ? <p role="status">一覧を読み込んでいます…</p> : null}
+      {!loading && error ? <p role="alert">一覧を読み込めませんでした。通信環境を確認してください。</p> : null}
+      {!loading && !error && rows.length === 0 ? (
+        <div className="tracked-bills-empty">
+          <WalletCards size={32} aria-hidden="true" />
+          <h2>登録したお札はまだありません</h2>
+          <p>この端末から最初に登録したお札が、ここに表示されます。</p>
+        </div>
+      ) : null}
+      <div className="tracked-bills-list">
+        {rows.map(({ bill }) => {
+          const latestSighting = bill.sightings[bill.sightings.length - 1];
+          return (
+            <button
+              className="tracked-bill-card"
+              key={bill.id}
+              onClick={() => onSelectBill(bill.serialNumber)}
+            >
+              <span className="tracked-bill-card-main">
+                <strong>{formatSerialDisplay(bill.serialNumber)}</strong>
+                <span>{bill.denomination.toLocaleString()}円札</span>
+                <span>最終発見地域: {latestSighting ? `${latestSighting.prefecture} ${latestSighting.municipality}` : '記録なし'}</span>
+                <span>発見回数: {bill.sightingsCount}回</span>
+                <span>最終発見: {new Date(bill.lastSightedAt).toLocaleString('ja-JP')}</span>
+              </span>
+              <ArrowRight size={20} aria-hidden="true" />
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}

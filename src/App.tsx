@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Compass, PlusCircle, Search } from 'lucide-react';
+import { Compass, PlusCircle, Search, WalletCards } from 'lucide-react';
 import { HomeView } from './components/HomeView';
 import { RegisterView } from './components/RegisterView';
 import { SearchView } from './components/SearchView';
@@ -9,14 +9,36 @@ import type { RegisterResult } from './types';
 import { normalizeSerialNumber } from './utils/serial';
 import { isFirebaseConfigured } from './services/firebase';
 import { TimingMonitor } from './components/TimingMonitor';
+import { TrackedBillsView } from './components/TrackedBillsView';
+import { auth, ensureAnonymousUser, observeAuthState } from './services/firebase';
 
-type ViewMode = 'home' | 'register' | 'search' | 'bill';
+type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked';
 
 export function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('home');
   const [selectedSerial, setSelectedSerial] = useState<string>('');
   const [registerInitialSerial, setRegisterInitialSerial] = useState<string>('');
   const [celebrationResult, setCelebrationResult] = useState<RegisterResult | null>(null);
+  const [authUid, setAuthUid] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(!auth);
+  const [trackingNotice, setTrackingNotice] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = observeAuthState((user) => {
+      setAuthUid(user?.uid ?? null);
+      setAuthReady(true);
+      if (!user) {
+        void ensureAnonymousUser().catch((error) => {
+          console.warn('Anonymous Auth unavailable; this-device bill list is disabled:', error);
+        });
+      }
+    }, (error) => {
+      console.warn('Firebase Auth state unavailable; public features remain enabled:', error);
+      setAuthUid(null);
+      setAuthReady(true);
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   // URLハッシュまたはパスのパース (/bill/:serial)
   useEffect(() => {
@@ -33,6 +55,8 @@ export function App() {
         setCurrentView('register');
       } else if (hash === '#/search') {
         setCurrentView('search');
+      } else if (hash === '#/my-bills') {
+        setCurrentView('tracked');
       } else {
         setCurrentView('home');
       }
@@ -65,13 +89,17 @@ export function App() {
     } else if (view === 'search') {
       setCurrentView('search');
       window.location.hash = '#/search';
+    } else if (view === 'tracked' && authUid) {
+      setCurrentView('tracked');
+      window.location.hash = '#/my-bills';
     } else {
       setCurrentView('home');
       window.location.hash = '#/';
     }
   };
 
-  const handleRegisterSuccess = (result: RegisterResult) => {
+  const handleRegisterSuccess = (result: RegisterResult, trackingFailed = false) => {
+    setTrackingNotice(trackingFailed);
     if (result.isRediscovery) {
       // 再発見時の祝祭モーダルを表示
       setCelebrationResult(result);
@@ -130,6 +158,11 @@ export function App() {
 
       {/* メインコンテンツ */}
       <main className="main-content">
+        {currentView === 'bill' && trackingNotice && (
+          <p className="tracked-bills-warning" role="status">
+            登録は完了しましたが、この端末の一覧には保存できませんでした。
+          </p>
+        )}
         {currentView === 'home' && (
           <HomeView
             onNavigateRegister={(serial) => navigateTo('register', serial)}
@@ -142,6 +175,7 @@ export function App() {
           <RegisterView
             initialSerial={registerInitialSerial}
             onSuccess={handleRegisterSuccess}
+            userUid={authUid}
             onCancel={() => navigateTo('home')}
           />
         )}
@@ -159,6 +193,16 @@ export function App() {
             onBack={() => navigateTo('home')}
             onRegisterAgain={(serial) => navigateTo('register', serial)}
           />
+        )}
+
+        {currentView === 'tracked' && authUid && (
+          <TrackedBillsView uid={authUid} onSelectBill={(serial) => navigateTo('bill', serial)} />
+        )}
+        {currentView === 'tracked' && authReady && !authUid && (
+          <div className="tracked-bills-unavailable">
+            <h1>この端末で登録したお札</h1>
+            <p>現在この機能を利用できません。公開中のお札の検索や閲覧は引き続き利用できます。</p>
+          </div>
         )}
       </main>
 
@@ -190,6 +234,17 @@ export function App() {
           <Search size={20} />
           <span>検索</span>
         </button>
+
+        {authReady && authUid && (
+          <button
+            className={`nav-item ${currentView === 'tracked' ? 'active' : ''}`}
+            onClick={() => navigateTo('tracked')}
+            id="nav-tracked-bills"
+          >
+            <WalletCards size={20} />
+            <span>この端末のお札</span>
+          </button>
+        )}
       </nav>
       <TimingMonitor />
     </div>
