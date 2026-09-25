@@ -67,8 +67,12 @@ export const HomeView = ({
         <section className="home-new-discovery" aria-labelledby="home-new-discovery-title">
           <div className="home-new-discovery-copy">
             <span className="home-new-discovery-kicker">あなたの旅ノートに新しい足跡</span>
-            <h2 id="home-new-discovery-title">再発見！</h2>
-            <p>{newTrackedBills.length}枚のお札に新しい発見があります</p>
+            <h2 id="home-new-discovery-title">あなたのお札に新しい旅の記録があります</h2>
+            <p>
+              {newTrackedBills.length === 1
+                ? '1枚のお札が、また別の場所で見つかりました'
+                : `${newTrackedBills.length}枚のお札に新しい発見があります`}
+            </p>
           </div>
           <span className="rediscovery-stamp" aria-label="再発見の記録">
             <span>再発見</span>
