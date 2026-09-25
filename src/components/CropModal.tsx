@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Check, X, Crop as CropIcon } from 'lucide-react';
+import { isDebugTiming } from '../utils/debug';
 
 export interface CropMetadata {
   cropX: number;
@@ -254,8 +255,7 @@ export const CropModal = ({ imageFile, onCrop, onCancel }: CropModalProps) => {
       scaleY,
     };
 
-    const isDebugTiming = typeof window !== 'undefined' && window.location.search.includes('debug=timing');
-    if (isDebugTiming) {
+    if (isDebugTiming()) {
       console.log(
         '%c[Crop Metadata] ' +
         `Natural: ${naturalW}x${naturalH} | ` +

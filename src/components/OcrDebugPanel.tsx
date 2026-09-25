@@ -3,12 +3,13 @@ import type { ImagePixelStats, PreprocessedPass } from '../utils/ocr';
 
 export interface OcrDebugData {
   rawImageUrl: string;
-  rawImageFile: File;
-  rawStats: ImagePixelStats;
+  rawImageFile?: File;
+  rawStats?: ImagePixelStats;
   cropMetadata: CropMetadata;
   croppedImageUrl: string;
-  croppedStats: ImagePixelStats;
+  croppedStats?: ImagePixelStats;
   passes: PreprocessedPass[];
+  error?: { pass: string; message: string; code?: string };
 }
 
 interface OcrDebugPanelProps {
@@ -16,7 +17,7 @@ interface OcrDebugPanelProps {
 }
 
 export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
-  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes } = data;
+  const { rawImageUrl, rawStats, cropMetadata, croppedImageUrl, croppedStats, passes, error } = data;
 
   const contrastPass = passes.find((p) => p.name.includes('Contrast'));
   const otsuPass = passes.find((p) => p.name.includes('Otsu'));
@@ -25,18 +26,16 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
     {
       title: '1. 元画像 (撮影/選択)',
       url: rawImageUrl,
-      width: rawStats.width,
-      height: rawStats.height,
+      width: rawStats?.width || cropMetadata.naturalWidth,
+      height: rawStats?.height || cropMetadata.naturalHeight,
       stats: rawStats,
-      isRaw: true,
     },
     {
       title: '2. クロップ直後画像',
       url: croppedImageUrl,
-      width: croppedStats.width,
-      height: croppedStats.height,
+      width: croppedStats?.width || cropMetadata.cropW,
+      height: croppedStats?.height || cropMetadata.cropH,
       stats: croppedStats,
-      isRaw: false,
     },
     {
       title: '3. Contrast Enhanced',
@@ -44,7 +43,6 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
       width: contrastPass?.stats.width || 0,
       height: contrastPass?.stats.height || 0,
       stats: contrastPass?.stats,
-      isRaw: false,
     },
     {
       title: '4. Otsu Binarized',
@@ -52,7 +50,6 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
       width: otsuPass?.stats.width || 0,
       height: otsuPass?.stats.height || 0,
       stats: otsuPass?.stats,
-      isRaw: false,
     },
   ];
 
@@ -64,8 +61,9 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
         backgroundColor: '#0f172a',
         color: '#f8fafc',
         borderRadius: '12px',
-        border: '1.5px solid #334155',
+        border: '2px solid #38bdf8',
         fontSize: '12px',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
       }}
       id="ocr-pipeline-debug-panel"
     >
@@ -77,6 +75,12 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
           クライアント端末内メモリ
         </span>
       </div>
+
+      {error && (
+        <div role="alert" style={{ marginBottom: '12px', padding: '8px 10px', background: '#7f1d1d', borderRadius: '6px', color: '#fee2e2' }}>
+          OCR error ({error.pass}){error.code ? ` · code: ${error.code}` : ''}: {error.message}
+        </div>
+      )}
 
       {/* 座標変換サマリー */}
       <div
@@ -99,7 +103,7 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
       </div>
 
       {/* 4枚の実画像プレビューグリッド */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
         {images.map((item, idx) => (
           <div
             key={idx}
@@ -140,7 +144,7 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
                   }}
                 />
               ) : (
-                <span style={{ color: '#64748b', fontSize: '10px' }}>画像なし</span>
+                <span style={{ color: '#64748b', fontSize: '10px' }}>処理中または画像なし</span>
               )}
             </div>
 
@@ -157,11 +161,13 @@ export const OcrDebugPanel = ({ data }: OcrDebugPanelProps) => {
               }}
             >
               <div>解像度: <strong style={{ color: '#e2e8f0' }}>{item.width} x {item.height}</strong></div>
-              {item.stats && (
+              {item.stats ? (
                 <>
                   <div>輝度 (min/max/avg): <strong style={{ color: '#e2e8f0' }}>{item.stats.minLum} / {item.stats.maxLum} / {item.stats.avgLum}</strong></div>
                   <div>透明率: <strong style={{ color: item.stats.transparentRatio === '0%' ? '#4ade80' : '#f87171' }}>{item.stats.transparentRatio}</strong></div>
                 </>
+              ) : (
+                <div style={{ color: '#64748b' }}>統計解析中...</div>
               )}
             </div>
           </div>

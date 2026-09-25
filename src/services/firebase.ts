@@ -6,6 +6,7 @@ import {
   type AppCheck,
 } from 'firebase/app-check';
 import { initializeFirestore, type Firestore } from 'firebase/firestore';
+import { isDebugTiming } from '../utils/debug';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -124,8 +125,7 @@ export async function runDiagnoseAppCheck(): Promise<{
   expireTimeMillis?: number;
   error?: string;
 } | null> {
-  if (typeof window === 'undefined') return null;
-  if (!window.location.search.includes('debug=timing')) return null;
+  if (!isDebugTiming()) return null;
 
   if (!appCheck) {
     const errorMsg = isAppCheckConfigured
@@ -167,7 +167,7 @@ export async function runDiagnoseAppCheck(): Promise<{
 }
 
 // ?debug=timing が付いている場合のみ初期化完了後に診断を自動実行
-if (typeof window !== 'undefined' && window.location.search.includes('debug=timing') && appCheck) {
+if (isDebugTiming() && appCheck) {
   runDiagnoseAppCheck();
 }
 

@@ -11,9 +11,10 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
-import { recognizeBanknoteSerialFromImage, analyzeBlobStats, type PreprocessedPass } from '../utils/ocr.ts';
+import { recognizeBanknoteSerialFromImage, analyzeBlobStats } from '../utils/ocr.ts';
 import { CropModal, type CropMetadata } from './CropModal';
 import { OcrDebugPanel, type OcrDebugData } from './OcrDebugPanel';
+import { isDebugTiming } from '../utils/debug';
 import {
   PREFECTURES,
   getCitiesByPrefecture,
@@ -69,10 +70,19 @@ export const RegisterView = ({
 
   // ?debug=timing 用の画像診断データ
   const [ocrDebugData, setOcrDebugData] = useState<OcrDebugData | null>(null);
-  const isTimingDebug =
-    typeof window !== 'undefined' &&
-    window.location &&
-    window.location.search.includes('debug=timing');
+  const isTimingDebug = isDebugTiming();
+  const debugUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (isTimingDebug) console.log('[OCR Debug] enabled=true');
+  }, [isTimingDebug]);
+
+  const revokeDebugUrls = () => {
+    debugUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    debugUrlsRef.current = [];
+  };
+
+  useEffect(() => () => revokeDebugUrls(), []);
 
   const handleTriggerOcr = () => {
     if (isOcrProcessing) return;
@@ -85,6 +95,8 @@ export const RegisterView = ({
 
     if (!file) return;
 
+    revokeDebugUrls();
+    setOcrDebugData(null);
     rawFileRef.current = file;
     // 撮影/選択後、まずクロップモーダルを開いてユーザーに記番号領域を指定してもらう
     setPendingImageFile(file);
@@ -98,9 +110,18 @@ export const RegisterView = ({
     setOcrCandidates([]);
 
     const rawFile = rawFileRef.current;
+    let emittedOcrError = false;
 
     try {
-      let generatedPasses: PreprocessedPass[] = [];
+      if (isTimingDebug && rawFile) {
+        const rawImageUrl = URL.createObjectURL(rawFile);
+        const croppedImageUrl = URL.createObjectURL(croppedBlob);
+        debugUrlsRef.current.push(rawImageUrl, croppedImageUrl);
+        setOcrDebugData({ rawImageUrl, croppedImageUrl, cropMetadata: metadata, passes: [] });
+        void Promise.all([analyzeBlobStats(rawFile), analyzeBlobStats(croppedBlob)]).then(([rawStats, croppedStats]) => {
+          setOcrDebugData((current) => current ? { ...current, rawStats, croppedStats } : current);
+        }).catch((error) => console.warn('Failed to analyze OCR debug images:', error));
+      }
 
       const candidates = await recognizeBanknoteSerialFromImage(
         croppedBlob,
@@ -108,30 +129,30 @@ export const RegisterView = ({
           setOcrStatusMessage(msg);
         },
         (passes) => {
-          generatedPasses = passes;
+          if (isTimingDebug && rawFile) {
+            const passUrls = passes.map((pass) => pass.previewUrl);
+            debugUrlsRef.current.push(...passUrls);
+            setOcrDebugData((current) => current ? { ...current, passes } : current);
+            console.log('[OCR Debug] passesReady=true');
+            console.log('[OCR Debug] imageCount=4');
+          }
+        },
+        (event) => {
+          if (!isTimingDebug) return;
+          if (event.type === 'error') {
+            emittedOcrError = true;
+            console.log(`[OCR Debug] recognizeError pass=${event.pass} message=${event.message || 'Unknown error'}`);
+            setOcrDebugData((current) => current ? {
+              ...current,
+              error: { pass: event.pass, message: event.message || 'Unknown error', code: event.code },
+            } : current);
+          } else if (event.type === 'start') {
+            console.log(`[OCR Debug] recognizeStart pass=${event.pass}`);
+          } else {
+            console.log(`[OCR Debug] recognizeEnd pass=${event.pass}`);
+          }
         }
       );
-
-      // debug=timing の場合、画像診断情報を構築
-      if (isTimingDebug && rawFile) {
-        try {
-          const [rawStats, croppedStats] = await Promise.all([
-            analyzeBlobStats(rawFile),
-            analyzeBlobStats(croppedBlob),
-          ]);
-          setOcrDebugData({
-            rawImageUrl: URL.createObjectURL(rawFile),
-            rawImageFile: rawFile,
-            rawStats,
-            cropMetadata: metadata,
-            croppedImageUrl: URL.createObjectURL(croppedBlob),
-            croppedStats,
-            passes: generatedPasses,
-          });
-        } catch (dbgErr) {
-          console.warn('Failed to build debug diagnostics:', dbgErr);
-        }
-      }
 
       if (candidates.length === 1) {
         setSerialInput(candidates[0]);
@@ -156,6 +177,16 @@ export const RegisterView = ({
       }
     } catch (err) {
       console.warn('OCR processing error:', err);
+      if (isTimingDebug) {
+        const error = err as Error & { code?: string };
+        if (!emittedOcrError) {
+          console.log(`[OCR Debug] recognizeError pass=initialize message=${error.message || String(err)}`);
+        }
+        setOcrDebugData((current) => current ? {
+          ...current,
+          error: current.error || { pass: 'initialize', message: error.message || String(err), code: error.code },
+        } : current);
+      }
       setOcrCandidates([]);
       setOcrMessage({
         type: 'warn',
@@ -637,6 +668,8 @@ export const RegisterView = ({
           </div>
         </div>
 
+        {isTimingDebug && ocrDebugData && <OcrDebugPanel data={ocrDebugData} />}
+
         {/* 現在地選択 */}
         <div className="form-group">
           <div className="form-label">
@@ -800,10 +833,6 @@ export const RegisterView = ({
         />
       )}
 
-      {/* ?debug=timing 時の画像パイプライン診断パネル */}
-      {isTimingDebug && ocrDebugData && (
-        <OcrDebugPanel data={ocrDebugData} />
-      )}
     </div>
   );
 };

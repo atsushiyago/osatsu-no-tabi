@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { subscribeTiming, clearTimingLogs, type TimingEntry } from '../utils/timing';
 import { isAppCheckConfigured, runDiagnoseAppCheck } from '../services/firebase';
+import { isDebugTiming } from '../utils/debug';
 import { Activity, ChevronDown, ChevronUp, Trash2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export const TimingMonitor = () => {
-  const isVisible =
-    import.meta.env.DEV ||
-    (typeof window !== 'undefined' && window.location.search.includes('debug=timing'));
+  const isVisible = import.meta.env.DEV || isDebugTiming();
 
   const [entries, setEntries] = useState<TimingEntry[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -24,7 +23,7 @@ export const TimingMonitor = () => {
     });
 
     // ?debug=timing の場合は診断を実行して状態を保持
-    if (typeof window !== 'undefined' && window.location.search.includes('debug=timing')) {
+    if (isDebugTiming()) {
       runDiagnoseAppCheck().then((res) => {
         if (res) setDiagResult(res);
       });
