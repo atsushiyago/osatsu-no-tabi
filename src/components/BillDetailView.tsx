@@ -428,16 +428,18 @@ export const BillDetailView = ({
         </div>
       </section>
 
-      {/* 現在地の記録は履歴を読んだ後に選べる副次操作 */}
-      <div style={{ marginTop: '24px' }}>
+      {/* 紙幣が手元にあるときの再発見記録 */}
+      <section className="detail-rediscovery-action" aria-labelledby="detail-rediscovery-title">
+        <h3 id="detail-rediscovery-title">次にこのお札を見つけたら</h3>
+        <p>このお札が今あなたの手元にあるなら、<br className="detail-rediscovery-copy-break" />ここで再発見を記録できます。</p>
         <button
-          className="btn-secondary detail-secondary-action"
+          className="detail-rediscovery-button"
           onClick={() => onRegisterAgain(serialNumber)}
           id="btn-re-register-this"
         >
-          <span>このお札の現在地を記録する</span>
+          <span>この場所で再発見を記録</span>
         </button>
-      </div>
+      </section>
     </div>
   );
 };

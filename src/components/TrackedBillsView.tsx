@@ -67,8 +67,13 @@ export function TrackedBillsView({ uid, onSelectBill }: TrackedBillsViewProps) {
                 <span>{bill.denomination.toLocaleString()}円札</span>
                 <span>最終発見地域: {latestSighting ? `${latestSighting.prefecture} ${latestSighting.municipality}` : '記録なし'}</span>
                 {row.lastSeenMunicipality && currentMunicipality && row.lastSeenMunicipality !== currentMunicipality && (
-                  <span className="tracked-bill-region-change">
-                    前回確認：{row.lastSeenMunicipality} → 現在：{currentMunicipality}
+                  <span
+                    className="travel-route tracked-bill-region-change"
+                    aria-label={`前回確認 ${row.lastSeenMunicipality} から現在 ${currentMunicipality} へ`}
+                  >
+                    <span><small>前回</small>{row.lastSeenMunicipality}</span>
+                    <span className="travel-route-dots" aria-hidden="true">··· →</span>
+                    <span><small>現在</small>{currentMunicipality}</span>
                   </span>
                 )}
                 <span>発見回数: {bill.sightingsCount}回</span>

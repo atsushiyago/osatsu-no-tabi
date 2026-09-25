@@ -13,17 +13,22 @@ import type { GlobalStats, BillWithSightings } from '../types';
 import { getGlobalStats, getRecentJourneys } from '../services/billService';
 import { formatSerialDisplay } from '../utils/serial';
 import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
+import type { TrackedBillRow } from '../services/trackedBills';
 
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
   onNavigateSearch: () => void;
   onSelectBill: (serial: string) => void;
+  trackedBills: TrackedBillRow[] | null;
+  onNavigateTrackedBills: () => void;
 }
 
 export const HomeView = ({
   onNavigateRegister,
   onNavigateSearch,
   onSelectBill,
+  trackedBills,
+  onNavigateTrackedBills,
 }: HomeViewProps) => {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
@@ -34,6 +39,9 @@ export const HomeView = ({
         ...recentJourneys,
         ...SAMPLE_JOURNEYS.slice(0, Math.max(0, 8 - recentJourneys.length)),
       ];
+  const newTrackedBills = trackedBills?.filter((row) => row.unseenSightingsCount > 0) ?? [];
+  const leadingNewBill = newTrackedBills[0];
+  const latestNewSighting = leadingNewBill?.bill.sightings.at(-1);
 
   useEffect(() => {
     async function loadData() {
@@ -55,6 +63,34 @@ export const HomeView = ({
 
   return (
     <div>
+      {newTrackedBills.length > 0 && (
+        <section className="home-new-discovery" aria-labelledby="home-new-discovery-title">
+          <div className="home-new-discovery-copy">
+            <span className="home-new-discovery-kicker">あなたの旅ノートに新しい足跡</span>
+            <h2 id="home-new-discovery-title">再発見！</h2>
+            <p>{newTrackedBills.length}枚のお札に新しい発見があります</p>
+          </div>
+          <span className="rediscovery-stamp" aria-label="再発見の記録">
+            <span>再発見</span>
+          </span>
+          {leadingNewBill?.lastSeenMunicipality && latestNewSighting?.municipality &&
+            leadingNewBill.lastSeenMunicipality !== latestNewSighting.municipality && (
+              <div
+                className="travel-route home-new-discovery-route"
+                aria-label={`前回確認 ${leadingNewBill.lastSeenMunicipality} から現在 ${latestNewSighting.municipality} へ`}
+              >
+                <span>{leadingNewBill.lastSeenMunicipality}</span>
+                <span className="travel-route-dots" aria-hidden="true">··· →</span>
+                <span>{latestNewSighting.municipality}</span>
+              </div>
+            )}
+          <button className="home-new-discovery-link" onClick={onNavigateTrackedBills}>
+            <span>この端末のお札を見る</span>
+            <ArrowRight size={18} aria-hidden="true" />
+          </button>
+        </section>
+      )}
+
       {/* ヒーロー */}
       <section className="hero">
         <div className="hero-tag">

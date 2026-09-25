@@ -11,6 +11,7 @@ import { isFirebaseConfigured } from './services/firebase';
 import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
 import { auth, ensureAnonymousUser, observeAuthState } from './services/firebase';
+import { getTrackedBills, type TrackedBillRow } from './services/trackedBills';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked';
 
@@ -22,6 +23,7 @@ export function App() {
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(!auth);
   const [trackingNotice, setTrackingNotice] = useState(false);
+  const [homeTrackedBills, setHomeTrackedBills] = useState<TrackedBillRow[] | null>(null);
 
   useEffect(() => {
     const unsubscribe = observeAuthState((user) => {
@@ -39,6 +41,18 @@ export function App() {
     });
     return () => unsubscribe?.();
   }, []);
+
+  useEffect(() => {
+    if (!authUid || currentView !== 'home') return;
+    let active = true;
+    getTrackedBills(authUid)
+      .then((rows) => { if (active) setHomeTrackedBills(rows); })
+      .catch((error) => {
+        console.warn('Could not check this-device discoveries for Home:', error);
+        if (active) setHomeTrackedBills([]);
+      });
+    return () => { active = false; };
+  }, [authUid, currentView]);
 
   // URLハッシュまたはパスのパース (/bill/:serial)
   useEffect(() => {
@@ -93,6 +107,7 @@ export function App() {
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
     } else {
+      setHomeTrackedBills(null);
       setCurrentView('home');
       window.location.hash = '#/';
     }
@@ -168,6 +183,8 @@ export function App() {
             onNavigateRegister={(serial) => navigateTo('register', serial)}
             onNavigateSearch={() => navigateTo('search')}
             onSelectBill={(serial) => navigateTo('bill', serial)}
+            trackedBills={authUid ? homeTrackedBills : null}
+            onNavigateTrackedBills={() => navigateTo('tracked')}
           />
         )}
 
