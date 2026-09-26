@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   Compass,
-  Search,
   PlusCircle,
   MapPin,
   TrendingUp,
@@ -27,7 +26,6 @@ interface HomeViewProps {
 
 export const HomeView = ({
   onNavigateRegister,
-  onNavigateSearch,
   onSelectBill,
   trackedBills,
   onNavigateTrackedBills,
@@ -117,27 +115,14 @@ export const HomeView = ({
           そのお札が日本をどう旅したのかを見ることができます。
         </p>
 
-        <p className="home-first-step-copy">
-          まず記番号を検索。未登録なら登録、登録済みなら今いる市区町村で再発見を記録できます。
-        </p>
-
         <div className="cta-group">
           <button
             className="btn-primary"
-            onClick={onNavigateSearch}
-            id="btn-search-top"
-          >
-            <Search size={18} />
-            <span>記番号を検索する</span>
-          </button>
-
-          <button
-            className="btn-secondary"
             onClick={() => onNavigateRegister()}
             id="btn-register-top"
           >
             <PlusCircle size={20} />
-            <span>記番号を入力して登録する</span>
+            <span>手元にあるお札を登録する</span>
           </button>
         </div>
       </section>

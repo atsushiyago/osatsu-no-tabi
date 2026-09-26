@@ -367,13 +367,6 @@ body {
 }
 .home-return-note p { margin: 0; }
 .home-return-note-followup { color: #365d4a; font-weight: 750; }
-.home-first-step-copy {
-  margin: 0 0 12px;
-  color: #3e433d;
-  font-size: 15px;
-  line-height: 1.5;
-  text-align: left;
-}
 .registration-return-note {
   margin: 0 0 20px;
   padding: 14px 16px;
