@@ -1,229 +1,218 @@
-import { validateSerialNumber } from './serial.ts';
+import { normalizeSerialInput, validateSerialNumber } from './serial.ts';
 import { isDebugTiming } from './debug.ts';
 
-/**
- * 混同されやすい文字の位置ベース補正マップ
- */
-const NUM_TO_LETTER: Record<string, string> = {
-  '0': 'O',
-  '1': 'I',
-  '5': 'S',
-  '8': 'B',
-  '2': 'Z',
-};
+/** OCRで混同されやすい文字。候補生成時は期待される位置の文字種だけを使う。 */
+export const OCR_CONFUSION_MAP = {
+  letterToDigit: {
+    O: ['0'], Q: ['0'], D: ['0'],
+    I: ['1'], L: ['1'],
+    Z: ['2'], S: ['5'], G: ['6'], T: ['7'], B: ['8'],
+  },
+  digitToLetter: {
+    '0': ['O', 'Q'], '1': ['I', 'L'], '2': ['Z'], '5': ['S'],
+    '6': ['G'], '7': ['T'], '8': ['B'],
+  },
+} as const;
 
-const LETTER_TO_NUM: Record<string, string> = {
-  'O': '0',
-  'I': '1',
-  'L': '1',
-  'S': '5',
-  'B': '8',
-  'Z': '2',
-};
+const MAX_OCR_CORRECTIONS = 2;
+const SERIAL_LAYOUTS = [
+  { prefixLength: 1, suffixLength: 1 },
+  { prefixLength: 2, suffixLength: 1 },
+  { prefixLength: 1, suffixLength: 2 },
+  { prefixLength: 2, suffixLength: 2 },
+] as const;
+
+export interface ValidOcrSerialCandidate {
+  serial: string;
+  correctionCount: number;
+}
+
+export interface OcrSerialCorrectionResult {
+  rawText: string;
+  normalizedText: string;
+  generatedCandidateCount: number;
+  validCandidates: ValidOcrSerialCandidate[];
+  selectedCandidate: string | null;
+  correctionCount: number | null;
+  ambiguous: boolean;
+  ambiguityReason?: 'multiple-valid-candidates' | 'possible-truncated-suffix';
+  status: 'raw-valid' | 'corrected' | 'ambiguous' | 'no-valid-candidate';
+}
+
+/**
+ * OCR文字列を既存の記番号入力と同じNFKC・大文字化・英数字正規化に通し、
+ * validatorが受理する記番号構造に沿って最大2文字までの置換候補を作る。
+ */
+export function correctOcrSerial(rawText: string): OcrSerialCorrectionResult {
+  const normalizedText = normalizeSerialInput(rawText);
+  const rawValidation = validateSerialNumber(normalizedText);
+
+  if (rawValidation.isValid) {
+    return {
+      rawText,
+      normalizedText,
+      generatedCandidateCount: 1,
+      validCandidates: [{ serial: normalizedText, correctionCount: 0 }],
+      selectedCandidate: normalizedText,
+      correctionCount: 0,
+      ambiguous: false,
+      status: 'raw-valid',
+    };
+  }
+
+  if (normalizedText.length < 8 || normalizedText.length > 10) {
+    return {
+      rawText,
+      normalizedText,
+      generatedCandidateCount: 0,
+      validCandidates: [],
+      selectedCandidate: null,
+      correctionCount: null,
+      ambiguous: false,
+      status: 'no-valid-candidate',
+    };
+  }
+
+  type GeneratedCandidate = ValidOcrSerialCandidate & {
+    changedFinalCharacter: boolean;
+    prefixLength: number;
+    suffixLength: number;
+  };
+  const generated = new Set<string>();
+  const valid = new Map<string, GeneratedCandidate>();
+
+  for (const { prefixLength, suffixLength } of SERIAL_LAYOUTS) {
+    if (normalizedText.length !== prefixLength + 6 + suffixLength) continue;
+
+    const choices: string[][] = [];
+    let layoutPossible = true;
+    for (let index = 0; index < normalizedText.length; index++) {
+      const char = normalizedText[index];
+      const expectsLetter = index < prefixLength || index >= prefixLength + 6;
+      const isLetter = char >= 'A' && char <= 'Z';
+      const isDigit = char >= '0' && char <= '9';
+
+      if (expectsLetter && isLetter || !expectsLetter && isDigit) {
+        choices.push([char]);
+      } else {
+        const replacements = expectsLetter
+          ? OCR_CONFUSION_MAP.digitToLetter[char as keyof typeof OCR_CONFUSION_MAP.digitToLetter]
+          : OCR_CONFUSION_MAP.letterToDigit[char as keyof typeof OCR_CONFUSION_MAP.letterToDigit];
+        if (!replacements?.length) {
+          layoutPossible = false;
+          break;
+        }
+        choices.push([...replacements]);
+      }
+    }
+    if (!layoutPossible) continue;
+
+    const characters: string[] = [];
+    const visit = (index: number, correctionCount: number) => {
+      if (correctionCount > MAX_OCR_CORRECTIONS) return;
+      if (index === choices.length) {
+        const serial = characters.join('');
+        generated.add(serial);
+        if (!validateSerialNumber(serial).isValid) return;
+        const candidate: GeneratedCandidate = {
+          serial,
+          correctionCount,
+          changedFinalCharacter: serial.at(-1) !== normalizedText.at(-1),
+          prefixLength,
+          suffixLength,
+        };
+        const existing = valid.get(serial);
+        if (!existing || candidate.correctionCount < existing.correctionCount) valid.set(serial, candidate);
+        return;
+      }
+
+      const original = normalizedText[index];
+      for (const option of choices[index]) {
+        characters.push(option);
+        visit(index + 1, correctionCount + Number(option !== original));
+        characters.pop();
+      }
+    };
+    visit(0, 0);
+  }
+
+  const validCandidates = [...valid.values()]
+    .sort((a, b) => a.correctionCount - b.correctionCount || a.serial.localeCompare(b.serial))
+    .map(({ serial, correctionCount }) => ({ serial, correctionCount }));
+  const fewestCorrections = validCandidates[0]?.correctionCount;
+  const bestCandidates = validCandidates.filter((candidate) => candidate.correctionCount === fewestCorrections);
+  const bestGenerated = [...valid.values()].filter((candidate) => candidate.correctionCount === fewestCorrections);
+  const possibleTruncatedSuffix = bestGenerated.some((candidate) =>
+    candidate.changedFinalCharacter && candidate.prefixLength === 2 && candidate.suffixLength === 1
+  );
+  const multipleBestCandidates = bestCandidates.length > 1;
+  const ambiguous = multipleBestCandidates || possibleTruncatedSuffix;
+  const selectedCandidate = !ambiguous && bestCandidates.length === 1 ? bestCandidates[0] : null;
+
+  return {
+    rawText,
+    normalizedText,
+    generatedCandidateCount: generated.size,
+    validCandidates,
+    selectedCandidate: selectedCandidate?.serial ?? null,
+    correctionCount: selectedCandidate?.correctionCount ?? null,
+    ambiguous,
+    ...(ambiguous ? {
+      ambiguityReason: multipleBestCandidates ? 'multiple-valid-candidates' as const : 'possible-truncated-suffix' as const,
+    } : {}),
+    status: validCandidates.length === 0
+      ? 'no-valid-candidate'
+      : ambiguous
+        ? 'ambiguous'
+        : 'corrected',
+  };
+}
 
 interface CandidateWithScore {
   serial: string;
   corrections: number;
 }
 
-/**
- * 文字列が指定された記番号構成（先頭英字 + 中央数字6桁 + 末尾英字）に
- * 補正可能かどうかを判定し、可能であれば補正後の文字列と補正文字数を返す。
- * 
- * ※注意: OCR結果を無理やり変換しすぎないよう、補正文字数が2文字を超える場合は不適格とする。
- */
-function tryFixPattern(
-  chunk: string,
-  prefixLen: number,
-  suffixLen: number
-): CandidateWithScore | null {
-  if (chunk.length !== prefixLen + 6 + suffixLen) {
-    return null;
-  }
-
-  let corrections = 0;
-  const result: string[] = [];
-
-  // 1. 先頭部 (英字であるべき位置)
-  for (let i = 0; i < prefixLen; i++) {
-    const char = chunk[i];
-    if (char >= 'A' && char <= 'Z') {
-      result.push(char);
-    } else if (NUM_TO_LETTER[char]) {
-      result.push(NUM_TO_LETTER[char]);
-      corrections++;
-    } else {
-      return null; // 補正不能
-    }
-  }
-
-  // 2. 中央部 (数字6桁であるべき位置)
-  const middleStart = prefixLen;
-  const middleEnd = prefixLen + 6;
-  for (let i = middleStart; i < middleEnd; i++) {
-    const char = chunk[i];
-    if (char >= '0' && char <= '9') {
-      result.push(char);
-    } else if (LETTER_TO_NUM[char]) {
-      result.push(LETTER_TO_NUM[char]);
-      corrections++;
-    } else {
-      return null; // 補正不能
-    }
-  }
-
-  // 3. 末尾部 (英字であるべき位置)
-  const suffixStart = middleEnd;
-  const suffixEnd = middleEnd + suffixLen;
-  for (let i = suffixStart; i < suffixEnd; i++) {
-    const char = chunk[i];
-    if (char >= 'A' && char <= 'Z') {
-      result.push(char);
-    } else if (NUM_TO_LETTER[char]) {
-      result.push(NUM_TO_LETTER[char]);
-      corrections++;
-    } else {
-      return null; // 補正不能
-    }
-  }
-
-  // 無理な補正の防止: 補正が3文字以上の場合はOCR結果の原形を留めていないため候補から除外
-  if (corrections > 2) {
-    return null;
-  }
-
-  const serial = result.join('');
-  const validation = validateSerialNumber(serial);
-  if (!validation.isValid) {
-    return null;
-  }
-
-  return { serial, corrections };
-}
-
-/**
- * 長さ8〜10文字のトークンに対して、可能な記番号パターンを検証・補正する
- */
-function evaluateToken(token: string): CandidateWithScore[] {
-  const candidates: CandidateWithScore[] = [];
-
-  // 日本銀行券の記番号パターン:
-  // 長さ8: 1英字 + 6数字 + 1英字
-  // 長さ9: 2英字 + 6数字 + 1英字 または 1英字 + 6数字 + 2英字
-  // 長さ10: 2英字 + 6数字 + 2英字
-  const patterns: [number, number][] = [];
-  if (token.length === 8) {
-    patterns.push([1, 1]);
-  } else if (token.length === 9) {
-    patterns.push([2, 1], [1, 2]);
-  } else if (token.length === 10) {
-    patterns.push([2, 2]);
-  }
-
-  for (const [prefixLen, suffixLen] of patterns) {
-    const res = tryFixPattern(token, prefixLen, suffixLen);
-    if (res) {
-      candidates.push(res);
-    }
-  }
-
-  return candidates;
-}
-
-/**
- * 全角を半角にし、大文字化するが、空白・改行・記号は保持する
- */
+/** NFKC・大文字化しつつ、OCR文面の区切りを維持する。 */
 export function cleanOcrText(input: string): string {
-  if (!input) return '';
-  // 全角英数字を半角に変換
-  let text = input.replace(/[！-～]/g, (s) => {
-    return String.fromCharCode(s.charCodeAt(0) - 0xfee0);
-  });
-  // 全角スペースを半角スペースに統一
-  text = text.replace(/\u3000/g, ' ');
-  return text.toUpperCase();
+  return input ? input.normalize('NFKC').toUpperCase() : '';
 }
 
 /**
- * OCR認識テキストから、日本銀行券の記番号候補を抽出・補正して優先度順に返す
- * 
- * @param ocrRawText Tesseract等から得られたOCR全文
- * @param maxCandidates 返す候補の最大件数（デフォルト3件）
+ * OCR全文から記番号候補を抽出する。文字欠落・挿入や並び替えは行わず、
+ * tokenまたは区切られた番号全体が8〜10文字のときだけ位置ベース補正を試す。
  */
-export function extractSerialCandidates(
-  ocrRawText: string,
-  maxCandidates = 3
-): string[] {
-  if (!ocrRawText || typeof ocrRawText !== 'string') {
-    return [];
-  }
+export function extractSerialCandidates(ocrRawText: string, maxCandidates = 3): string[] {
+  if (!ocrRawText || typeof ocrRawText !== 'string') return [];
 
   const cleanedText = cleanOcrText(ocrRawText);
-  const foundCandidates: CandidateWithScore[] = [];
-  const seenSerials = new Set<string>();
-
-  const addCandidate = (cand: CandidateWithScore) => {
-    if (!seenSerials.has(cand.serial)) {
-      seenSerials.add(cand.serial);
-      foundCandidates.push(cand);
+  const foundCandidates = new Map<string, CandidateWithScore>();
+  const addTokenCandidates = (token: string) => {
+    const result = correctOcrSerial(token);
+    for (const candidate of result.validCandidates) {
+      const existing = foundCandidates.get(candidate.serial);
+      if (!existing || candidate.correctionCount < existing.corrections) {
+        foundCandidates.set(candidate.serial, { serial: candidate.serial, corrections: candidate.correctionCount });
+      }
     }
   };
 
-  // 1. 英数字以外の境界（または先頭・末尾）で区切られた完全一致を探索
-  const isolatedExactRegex = /(?:^|[^A-Z0-9])([A-Z]{1,2}[0-9]{6}[A-Z]{1,2})(?:$|[^A-Z0-9])/g;
-  let match: RegExpExecArray | null;
-  while ((match = isolatedExactRegex.exec(cleanedText)) !== null) {
-    const candidate = match[1];
-    if (validateSerialNumber(candidate).isValid) {
-      addCandidate({ serial: candidate, corrections: 0 });
-    }
+  for (const word of cleanedText.split(/[\s\r\n\t]+/)) {
+    const token = word.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+    if (token) addTokenCandidates(token);
   }
 
-  // 2. 単語（空白・改行区切り）単位の検証 & 誤認識補正 (O/0, I/1, S/5, B/8, Z/2)
-  const rawWords = cleanedText.split(/[\s\r\n\t]+/);
-  for (const rawWord of rawWords) {
-    const trimmedWord = rawWord.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
-    if (trimmedWord.length >= 8 && trimmedWord.length <= 10) {
-      const resList = evaluateToken(trimmedWord);
-      for (const res of resList) {
-        addCandidate(res);
-      }
-    }
-  }
-
-  // 3. 記番号の途中に空白やハイフンが誤混入したケースの検出
   const segmentedRegex = /([A-Z0-9]{1,3}[\s-]+[A-Z0-9\s-]{4,10}[A-Z0-9]{1,3})/g;
+  let match: RegExpExecArray | null;
   while ((match = segmentedRegex.exec(cleanedText)) !== null) {
-    const collapsed = match[1].replace(/[\s-]/g, '');
-    if (collapsed.length >= 8 && collapsed.length <= 10) {
-      const resList = evaluateToken(collapsed);
-      for (const res of resList) {
-        addCandidate(res);
-      }
-    }
+    const token = normalizeSerialInput(match[1]);
+    if (token.length >= 8 && token.length <= 10) addTokenCandidates(token);
   }
 
-  // 4. まだ候補が見つからない場合のフォールバック:
-  // 空白・記号を全除去した連続英数字文字列からスライディングウィンドウ
-  if (foundCandidates.length === 0) {
-    const alphanumericOnly = cleanedText.replace(/[^A-Z0-9]/g, '');
-    for (const len of [8, 9, 10]) {
-      for (let i = 0; i <= alphanumericOnly.length - len; i++) {
-        const windowStr = alphanumericOnly.slice(i, i + len);
-        const resList = evaluateToken(windowStr);
-        for (const res of resList) {
-          addCandidate(res);
-        }
-      }
-    }
-  }
-
-  // スコアリングでソート:
-  // 1. 補正数が少ない（0 = 無補正完全一致）
-  // 2. 登録順（元の出現順）
-  foundCandidates.sort((a, b) => a.corrections - b.corrections);
-
-  return foundCandidates.slice(0, maxCandidates).map((c) => c.serial);
+  return [...foundCandidates.values()]
+    .sort((a, b) => a.corrections - b.corrections)
+    .slice(0, maxCandidates)
+    .map((candidate) => candidate.serial);
 }
 
 /**
@@ -381,6 +370,10 @@ export interface OcrSerialCandidate {
   requiresReview: boolean;
   confidence: number;
   sourcePasses: string[];
+}
+
+export interface OcrCorrectionDiagnostic extends OcrSerialCorrectionResult {
+  pass: string;
 }
 
 function serialFormatDistance(value: string): number {
@@ -614,7 +607,8 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
-  onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void
+  onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void,
+  onOcrCorrectionDiagnostics?: (results: OcrCorrectionDiagnostic[]) => void
 ): Promise<OcrSerialCandidate[]> {
   const debugTiming = isDebugTiming();
 
@@ -652,6 +646,7 @@ export async function recognizeBanknoteSerialFromImage(
 
   let worker: any = null;
   const allCandidateSerials = new Map<string, OcrSerialCandidate & { formatDistance: number }>();
+  const correctionDiagnostics: OcrCorrectionDiagnostic[] = [];
   try {
     try {
       worker = await createWorker('eng', 1, debugTiming ? {
@@ -705,6 +700,23 @@ export async function recognizeBanknoteSerialFromImage(
       const rawText = ret.data.text || '';
       const confidence = ret.data.confidence ?? 0;
       const passDuration = debugTiming ? performance.now() - passStart : 0;
+
+      if (debugTiming) {
+        const correction = correctOcrSerial(rawText);
+        const diagnostic: OcrCorrectionDiagnostic = { pass: pass.name, ...correction };
+        correctionDiagnostics.push(diagnostic);
+        onOcrCorrectionDiagnostics?.([...correctionDiagnostics]);
+        console.log('[OCR Correction]', {
+          pass: pass.name,
+          normalizedText: correction.normalizedText,
+          generatedCandidateCount: correction.generatedCandidateCount,
+          validCandidates: correction.validCandidates,
+          selectedCandidate: correction.selectedCandidate,
+          correctionCount: correction.correctionCount,
+          ambiguous: correction.ambiguous,
+          status: correction.status,
+        });
+      }
 
       onRecognizeEvent?.({ type: 'end', pass: pass.name });
 

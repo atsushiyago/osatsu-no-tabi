@@ -1,6 +1,83 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { extractSerialCandidates } from '../src/utils/ocr.ts';
+import { correctOcrSerial, extractSerialCandidates } from '../src/utils/ocr.ts';
+
+test('OCR後補正は正しいrawを変更せず、NFKCと大文字化を適用する', () => {
+  const result = correctOcrSerial('ａａ１２３４５６ｂ');
+
+  assert.strictEqual(result.normalizedText, 'AA123456B');
+  assert.deepStrictEqual(result.validCandidates, [{ serial: 'AA123456B', correctionCount: 0 }]);
+  assert.strictEqual(result.selectedCandidate, 'AA123456B');
+  assert.strictEqual(result.status, 'raw-valid');
+});
+
+test('位置に応じて O/0, B/8, S/5, Z/2, G/6, T/7 を置換する', () => {
+  const cases = [
+    ['AA123O56B', 'AA123056B'],
+    ['0A123456B', 'OA123456B'],
+    ['A1234B6C', 'A123486C'],
+    ['A1234568', 'A123456B'],
+    ['AA1234S6B', 'AA123456B'],
+    ['A1234565', 'A123456S'],
+    ['A123Z56B', 'A123256B'],
+    ['A1234562', 'A123456Z'],
+    ['A123G56B', 'A123656B'],
+    ['A1234566', 'A123456G'],
+    ['A123T56B', 'A123756B'],
+    ['A1234567', 'A123456T'],
+    ['A123Q56B', 'A123056B'],
+    ['A123D56B', 'A123056B'],
+    ['A123I56B', 'A123156B'],
+    ['A123L56B', 'A123156B'],
+  ];
+
+  for (const [raw, expected] of cases) {
+    const result = correctOcrSerial(raw);
+    assert.ok(result.validCandidates.some((candidate) => candidate.serial === expected), `${raw} -> ${expected}`);
+  }
+});
+
+test('複数置換でも上限2文字を守り、補正数の少ない候補を優先する', () => {
+  const twoCorrections = correctOcrSerial('A12O4568');
+  assert.strictEqual(twoCorrections.selectedCandidate, 'A120456B');
+  assert.strictEqual(twoCorrections.correctionCount, 2);
+
+  const tooManyCorrections = correctOcrSerial('01SSB82O');
+  assert.deepStrictEqual(tooManyCorrections.validCandidates, []);
+  assert.strictEqual(tooManyCorrections.status, 'no-valid-candidate');
+});
+
+test('複数の有効候補は曖昧として確定しない', () => {
+  const result = correctOcrSerial('AA1234560');
+
+  assert.deepStrictEqual(result.validCandidates.map((candidate) => candidate.serial), [
+    'AA123456O',
+    'AA123456Q',
+  ]);
+  assert.strictEqual(result.selectedCandidate, null);
+  assert.strictEqual(result.ambiguous, true);
+  assert.strictEqual(result.ambiguityReason, 'multiple-valid-candidates');
+});
+
+test('AF8590708は末尾文字の欠落と置換を区別できないため採用候補にしない', () => {
+  const result = correctOcrSerial('AF8590708');
+
+  assert.strictEqual(result.normalizedText, 'AF8590708');
+  assert.ok(result.validCandidates.some((candidate) => candidate.serial === 'AF859070B'));
+  assert.strictEqual(result.selectedCandidate, null);
+  assert.strictEqual(result.correctionCount, null);
+  assert.strictEqual(result.ambiguous, true);
+  assert.strictEqual(result.ambiguityReason, 'possible-truncated-suffix');
+  assert.deepStrictEqual(correctOcrSerial('AF859070').validCandidates, []);
+});
+
+test('無関係な文字列から番号を作らず、正常番号も別候補へ変えない', () => {
+  assert.deepStrictEqual(correctOcrSerial('HELLO WORLD THIS IS A TEST').validCandidates, []);
+
+  const valid = correctOcrSerial('AA123456O');
+  assert.deepStrictEqual(valid.validCandidates, [{ serial: 'AA123456O', correctionCount: 0 }]);
+  assert.strictEqual(valid.selectedCandidate, 'AA123456O');
+});
 
 test('標準的な記番号形式の認識 (AA123456A, A123456A, AA123456AA)', () => {
   // 8文字 (1英字 + 6数字 + 1英字)

@@ -190,6 +190,10 @@ export const RegisterView = ({
         (results) => {
           if (!isTimingDebug) return;
           setOcrDebugData((current) => current ? { ...current, psmDiagnostics: results } : current);
+        },
+        (results) => {
+          if (!isTimingDebug) return;
+          setOcrDebugData((current) => current ? { ...current, correctionDiagnostics: results } : current);
         }
       );
 
@@ -749,7 +753,15 @@ export const RegisterView = ({
           )}
         </div>
 
-        {isTimingDebug && ocrDebugData && <OcrDebugPanel data={ocrDebugData} />}
+        {isTimingDebug && ocrDebugData && (
+          <OcrDebugPanel
+            data={ocrDebugData}
+            onPrepareNextCapture={(message) => {
+              setOcrCandidates([]);
+              setOcrMessage({ type: 'info', text: message });
+            }}
+          />
+        )}
 
         {/* 現在地選択 */}
         <div className="form-group">
