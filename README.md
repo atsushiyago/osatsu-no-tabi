@@ -2,6 +2,8 @@
 
 日本国内を巡る日本円紙幣（1000円札・5000円札・10000円札）の移動をみんなで記録・追跡し、可視化する市民参加型のWebアプリケーションです。
 
+**Live demo:** [https://osatsu-no-tabi.ayago.workers.dev/](https://osatsu-no-tabi.ayago.workers.dev/)
+
 米国の著名な追跡プロジェクト「Where's George?」を原案に、現代のスマートフォン利用および日本の紙幣流通・プライバシー基準に最適化して再構築しています。
 
 ---
@@ -224,19 +226,15 @@ npm run deploy
 ```
 （`npm run build && wrangler deploy` が実行され、`dist/` ディレクトリがCloudflare Workers Static Assetsとして即座に公開されます。）
 
-### Firestore Rulesの段階移行
+### Firestore Rulesのデプロイ
 
-`firebase.json` は移行用の互換Rules（`firestore.rules`）を指しています。`firestore.strict.rules` は旧クライアント互換分岐を含まない最終版で、`firebase.strict.json` から個別にデプロイできます。
+本番の標準Rulesは `firestore.strict.rules` です。`firebase.json` もstrict Rulesを指しているため、通常のデプロイコマンドを使用できます。
 
-1. **Phase 1 — 移行用compat Rulesをdeploy**
-   - `firebase deploy --only firestore:rules --project <Firebase project ID>`
-   - `firestore.rules` は旧frontendのbill/sighting writeを維持しつつ、新frontendのbill + sighting + `rateLimits/{uid}` transactionを許可します。旧client形式（`lastSightedAtServer`なし）も互換のため許容します。
-2. **Phase 2 — 新frontendをdeployして実機確認**
-   - Cloudflareへ新frontendをdeployし、iPhone / Android / Macで新規登録、再発見、同一billの15分制限、rate-limit countの更新、同じUIDからの上限後の拒否を確認します。
-3. **Phase 3 — strict Rulesへ切り替え**
-   - 旧frontendの利用がなくなった後、`firebase deploy --only firestore:rules --config firebase.strict.json --project <Firebase project ID>` を実行します。
-   - `firestore.strict.rules`はbill/sighting writeにAuthとrate-limit更新を必須とし、旧未認証writeとrate-limitを伴わないwriteを終了します。
-   - compat期間は互換のため旧client writeを止められず、UID rate limitを迂回できます。移行用Rulesを恒久運用せず、実機確認後に必ずPhase 3へ進んでください。
+```bash
+firebase deploy --only firestore:rules --project <Firebase project ID>
+```
+
+移行用compat Rules（`firestore.rules`）は過去の旧frontend移行用です。**本番へdeployしないでください。** compat Rulesは旧clientの未認証writeを許容し、UID rate limitを迂回できる期間限定の設定です。参照や過去移行の記録のためファイルは残しています。
 
 ### 匿名Authと「この端末で登録したお札」
 
@@ -246,12 +244,7 @@ Firebase AuthenticationのAnonymous providerはFirebase Consoleで手動有効�
 
 MVPでは通知ではなく、「この端末で登録したお札」を再訪した際に新しい発見を表示する方式です。Push通知・メール通知・Cloud Functionsは実装していません。
 
-段階展開:
-
-1. Firebase ConsoleでAnonymous providerを有効にし、互換 `firestore.rules` をdeployします。これはprivate `users/{uid}/trackedBills` を本人だけに許可し、新しい既読fieldsもoptionalとして扱います。旧client互換期間の公開bill/sighting writeにはAuthを必須にしません。
-2. 新frontendをdeployします。匿名Auth、trackedBillsの新着表示と詳細画面での既読更新を有効にし、public bill/sightingのデータ形式と書き込み互換性は維持します。
-3. iPhone / Android / Macで匿名UID取得、初回登録後の一覧追加、検索だけでは追加されないこと、詳細遷移、公開閲覧、15分制限を確認します。
-4. 旧clientが使われなくなったことを確認後、`firebase.strict.json` で `firestore.strict.rules` をdeployします。この段階でbill/sighting書き込みのAuth必須化とstrict 15分制限へ移行します。今回はRulesの本番deployは行いません。
+段階展開の移行期間は終了しており、本番はstrict Rulesを標準とします。匿名Auth、trackedBillsの新着表示、bill/sighting書き込みのAuth必須化とrate limitはstrict Rulesで運用します。旧client用compat Rulesへ戻さないでください。
 
 #### UID単位rate limit
 

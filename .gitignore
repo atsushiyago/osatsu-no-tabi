@@ -15,6 +15,11 @@ dist-ssr
 .env.*
 !.env.example
 .wrangler
+.dev.vars
+service-account*.json
+credentials*.json
+*.pem
+*.key
 
 # Editor directories and files
 .vscode/*
