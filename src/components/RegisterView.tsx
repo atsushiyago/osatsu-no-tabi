@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
+import { useSerialInput } from '../hooks/useSerialInput';
 import { recognizeBanknoteSerialFromImage, analyzeBlobStats, type OcrSerialCandidate } from '../utils/ocr.ts';
 import { CropModal, type CropMetadata } from './CropModal';
 import { OcrDebugPanel, type OcrDebugData } from './OcrDebugPanel';
@@ -21,7 +22,6 @@ import {
   type CityLocation,
 } from '../utils/geo';
 import {
-  normalizeSerialInput,
   normalizeSerialNumber,
   validateSerialNumber,
   formatSerialDisplay,
@@ -68,7 +68,15 @@ export const RegisterView = ({
   onCancel,
 }: RegisterViewProps) => {
   const [denomination, setDenomination] = useState<Denomination>(1000);
-  const [serialInput, setSerialInput] = useState(normalizeSerialInput(initialSerial));
+  const {
+    value: serialInput,
+    setValue: setSerialInput,
+    onChange: onSerialInputChange,
+    onCompositionStart: onSerialCompositionStart,
+    onCompositionEnd: onSerialCompositionEnd,
+    isComposing: isSerialComposing,
+    validation,
+  } = useSerialInput(initialSerial);
   const [selectedPref, setSelectedPref] = useState('東京都');
   const [selectedCity, setSelectedCity] = useState('千代田区');
   const [userNote, setUserNote] = useState('');
@@ -112,7 +120,7 @@ export const RegisterView = ({
   useEffect(() => () => revokeDebugUrls(), []);
 
   const handleTriggerOcr = () => {
-    if (isOcrProcessing) return;
+    if (!isTimingDebug || isOcrProcessing) return;
     fileInputRef.current?.click();
   };
 
@@ -120,7 +128,7 @@ export const RegisterView = ({
     const file = e.target.files?.[0];
     e.target.value = '';
 
-    if (!file) return;
+    if (!isTimingDebug || !file) return;
 
     revokeDebugUrls();
     setOcrDebugData(null);
@@ -237,9 +245,8 @@ export const RegisterView = ({
   // 記番号の入力に応じて既存紙幣が存在するか確認
   useEffect(() => {
     const norm = normalizeSerialNumber(serialInput);
-    const val = validateSerialNumber(serialInput);
 
-    if (!val.isValid) {
+    if (!validation?.isValid) {
       setExistingBill(null);
       return;
     }
@@ -270,7 +277,7 @@ export const RegisterView = ({
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [serialInput]);
+  }, [serialInput, isSerialComposing, validation?.isValid]);
 
   // GPS取得と市区町村代表座標への丸め込み
   const handleAutoLocate = () => {
@@ -304,11 +311,12 @@ export const RegisterView = ({
   };
 
   const normSerial = normalizeSerialNumber(serialInput);
-  const validation = serialInput ? validateSerialNumber(serialInput) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+
+    if (isSerialComposing) return;
 
     // バリデーション
     const valResult = validateSerialNumber(serialInput);
@@ -498,7 +506,9 @@ export const RegisterView = ({
             className="text-input code-font"
             placeholder="例: AA123456B"
             value={serialInput}
-            onChange={(e) => setSerialInput(normalizeSerialInput(e.target.value))}
+            onChange={(e) => onSerialInputChange(e.target.value)}
+            onCompositionStart={onSerialCompositionStart}
+            onCompositionEnd={(e) => onSerialCompositionEnd(e.currentTarget.value)}
             maxLength={12}
             inputMode="text"
             autoCapitalize="characters"
@@ -510,7 +520,7 @@ export const RegisterView = ({
           <p className="input-hint">全角・小文字でも自動変換します</p>
 
           {/* リアルタイム正規化プレビュー */}
-          {serialInput && (
+          {serialInput && validation && (
             <div
               style={{
                 display: 'flex',
@@ -878,7 +888,7 @@ export const RegisterView = ({
       </form>
 
       {/* 記番号切り抜きモーダル */}
-      {pendingImageFile && (
+      {isTimingDebug && pendingImageFile && (
         <CropModal
           imageFile={pendingImageFile}
           onCrop={handleCropComplete}

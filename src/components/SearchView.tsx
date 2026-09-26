@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
-import { Search, Compass, ArrowRight } from 'lucide-react';
+import { useState } from 'react';
+import { Search, Compass, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
-import { normalizeSerialInput, formatSerialDisplay } from '../utils/serial';
-import { runValidatedSerialSearch } from '../utils/serialSearch';
+import { formatSerialDisplay } from '../utils/serial';
+import { prepareSerialSearch, runValidatedSerialSearch } from '../utils/serialSearch';
+import { useSerialInput } from '../hooks/useSerialInput';
 import { isDebugTiming } from '../utils/debug';
 
 interface SearchViewProps {
@@ -11,40 +12,50 @@ interface SearchViewProps {
 }
 
 export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
-  const [searchInput, setSearchInput] = useState('');
+  const {
+    value: searchInput,
+    setValue: setSearchInput,
+    onChange: onSerialInputChange,
+    onCompositionStart,
+    onCompositionEnd,
+    isComposing,
+    validation,
+  } = useSerialInput();
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const isComposing = useRef(false);
-
-  const normSerial = normalizeSerialInput(searchInput);
+  const normSerial = searchInput;
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isComposing) return;
+
     const form = e.currentTarget as HTMLFormElement;
     const input = form.elements.namedItem('serial') as HTMLInputElement | null;
     const rawInput = input?.value ?? searchInput;
-    const normalizedSerial = normalizeSerialInput(rawInput);
-    if (!normalizedSerial) return;
+    const request = prepareSerialSearch(rawInput);
+    if (!request.serial) return;
 
     if (isDebugTiming()) {
       console.debug('[Search Debug] raw input=', rawInput);
-      console.debug('[Search Debug] normalized input=', normalizedSerial);
-      console.debug('[Search Debug] search serial=', normalizedSerial);
-      console.debug('[Search Debug] target document ID=', normalizedSerial);
+      console.debug('[Search Debug] normalized input=', request.serial);
+      console.debug('[Search Debug] search serial=', request.serial);
+      console.debug('[Search Debug] target document ID=', request.documentId);
     }
 
     setNotFound(false);
+    setSearchInput(request.serial);
+    if (!request.isValid) {
+      setSearchedSerial(null);
+      return;
+    }
+
     setIsSearching(true);
-    setValidationError(null);
-    setSearchInput(normalizedSerial);
-    setSearchedSerial(normalizedSerial);
+    setSearchedSerial(request.serial);
 
     try {
       const searchResult = await runValidatedSerialSearch(rawInput, getBillBySerial);
       if (searchResult.status === 'invalid') {
-        setValidationError(searchResult.request.validationMessage ?? '記番号の形式を確認してください。');
         setSearchedSerial(null);
         return;
       }
@@ -66,6 +77,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
 
   const handleSampleClick = (serial: string) => {
     setSearchInput(serial);
+    setNotFound(false);
     onBillFound(serial);
   };
 
@@ -94,16 +106,13 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               placeholder="例: AA123456B"
               value={searchInput}
               onChange={(e) => {
-                setSearchInput(isComposing.current ? e.target.value : normalizeSerialInput(e.target.value));
+                onSerialInputChange(e.target.value);
                 setNotFound(false);
-                setValidationError(null);
               }}
-              onCompositionStart={() => { isComposing.current = true; }}
+              onCompositionStart={onCompositionStart}
               onCompositionEnd={(e) => {
-                isComposing.current = false;
-                setSearchInput(normalizeSerialInput(e.currentTarget.value));
+                onCompositionEnd(e.currentTarget.value);
                 setNotFound(false);
-                setValidationError(null);
               }}
               maxLength={12}
               inputMode="text"
@@ -115,29 +124,38 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
             />
           </div>
           <p className="input-hint">全角・小文字でも自動変換します</p>
-          {searchInput && (
-            <p className="input-hint">
-              検索キー: <strong>{formatSerialDisplay(normSerial)}</strong>
-            </p>
+          {searchInput && validation && (
+            <div
+              aria-live="polite"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                marginTop: '6px',
+                fontSize: '12px',
+                color: validation.isValid ? '#059669' : '#dc2626',
+              }}
+            >
+              {validation.isValid ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+              {validation.isValid ? (
+                <span>正規化記番号: <strong>{formatSerialDisplay(normSerial)}</strong></span>
+              ) : (
+                <span>{validation.message}</span>
+              )}
+            </div>
           )}
         </div>
 
         <button
           type="submit"
           className="btn-primary"
-          disabled={!normSerial || isSearching}
+          disabled={!validation?.isValid || isComposing || isSearching}
           id="btn-execute-search"
         >
           <Search size={18} />
           <span>{isSearching ? '検索中...' : 'このお札の旅を調べる'}</span>
         </button>
       </form>
-
-      {validationError && (
-        <p role="alert" style={{ color: '#9f3b2f', fontSize: '14px', margin: '-8px 0 20px' }}>
-          {validationError}
-        </p>
-      )}
 
       {/* 検索結果なしの場合 */}
       {notFound && searchedSerial && (

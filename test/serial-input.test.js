@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSerialInput } from '../src/utils/serial.ts';
 import { prepareSerialSearch, runValidatedSerialSearch } from '../src/utils/serialSearch.ts';
+import {
+  createSerialInputState,
+  endSerialComposition,
+  getSerialInputValidation,
+  startSerialComposition,
+  updateSerialInput,
+} from '../src/utils/serialInputState.ts';
 
 test('full-width lowercase serial input becomes uppercase ASCII', () => {
   assert.equal(normalizeSerialInput('ｔｅ１９５１０１ｃ'), 'TE195101C');
@@ -75,4 +82,37 @@ test('valid serial calls the Firestore lookup once with the exact document ID', 
   assert.equal(result.status, 'valid');
   assert.deepEqual(calls, ['M260706M']);
   assert.deepEqual(result.result, { id: 'M260706M' });
+});
+
+test('shared registration and search input validation reports errors as each invalid value is entered', () => {
+  for (const value of ['A', '123', 'AB12', 'M2607061']) {
+    const state = updateSerialInput(createSerialInputState(), value);
+    assert.equal(getSerialInputValidation(state)?.isValid, false, value);
+    assert.ok(getSerialInputValidation(state)?.message, value);
+  }
+});
+
+test('shared live validation clears as soon as the serial is corrected', () => {
+  const invalidState = updateSerialInput(createSerialInputState(), 'M2607061');
+  assert.equal(getSerialInputValidation(invalidState)?.isValid, false);
+
+  const correctedState = updateSerialInput(invalidState, 'M260706M');
+  assert.equal(getSerialInputValidation(correctedState)?.isValid, true);
+});
+
+test('full-width lowercase input is normalized before live validation', () => {
+  const state = updateSerialInput(createSerialInputState(), 'ｍ２６０７０６ｍ');
+  assert.equal(state.value, 'M260706M');
+  assert.equal(getSerialInputValidation(state)?.isValid, true);
+});
+
+test('IME composition defers validation until composition ends', () => {
+  const composing = startSerialComposition(createSerialInputState());
+  const intermediate = updateSerialInput(composing, 'Ａ');
+  assert.equal(intermediate.value, 'Ａ');
+  assert.equal(getSerialInputValidation(intermediate), null);
+
+  const completed = endSerialComposition('ｍ２６０７０６ｍ');
+  assert.equal(completed.value, 'M260706M');
+  assert.equal(getSerialInputValidation(completed)?.isValid, true);
 });
