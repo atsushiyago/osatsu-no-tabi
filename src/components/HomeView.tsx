@@ -90,7 +90,7 @@ export const HomeView = ({
             </div>
           )}
           <button className="home-new-discovery-link" onClick={onNavigateTrackedBills}>
-            <span>この端末のお札を見る</span>
+            <span>登録したお札を見る</span>
             <ArrowRight size={18} aria-hidden="true" />
           </button>
         </section>
@@ -117,30 +117,34 @@ export const HomeView = ({
           そのお札が日本をどう旅したのかを見ることができます。
         </p>
 
+        <p className="home-first-step-copy">
+          まず記番号を検索。未登録なら登録、登録済みなら今いる市区町村で再発見を記録できます。
+        </p>
+
         <div className="cta-group">
           <button
             className="btn-primary"
-            onClick={() => onNavigateRegister()}
-            id="btn-register-top"
-          >
-            <PlusCircle size={20} />
-            <span>手元にあるお札を登録する</span>
-          </button>
-
-          <button
-            className="btn-secondary"
             onClick={onNavigateSearch}
             id="btn-search-top"
           >
             <Search size={18} />
             <span>記番号を検索する</span>
           </button>
+
+          <button
+            className="btn-secondary"
+            onClick={() => onNavigateRegister()}
+            id="btn-register-top"
+          >
+            <PlusCircle size={20} />
+            <span>記番号を入力して登録する</span>
+          </button>
         </div>
       </section>
 
       <aside className="home-return-note" aria-label="また旅の続きを見る楽しみ">
-        <p>今日登録したお札が、数週間後には遠くの街で見つかっているかもしれません。</p>
-        <p className="home-return-note-followup">また旅の続きを見にきてください。</p>
+        <p>登録後も、お札はいつも通りお使いください。</p>
+        <p className="home-return-note-followup">数週間後、また旅の続きを見にきてください。</p>
       </aside>
 
       {/* 全体統計 */}

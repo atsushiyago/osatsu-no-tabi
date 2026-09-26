@@ -15,9 +15,9 @@ export function TrackedBillsView({ rows, loading, error, onSelectBill }: Tracked
 
   return (
     <section className="tracked-bills-view">
-      <h1>この端末で登録したお札</h1>
+      <h1>登録したお札</h1>
       <p className="tracked-bills-note">
-        ブラウザのデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。
+        この端末・ブラウザから登録したお札の一覧です。ブラウザデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。
       </p>
       {!loading && !error && newBillCount > 0 && (
         <p className="tracked-bills-new-summary" role="status">
@@ -30,7 +30,7 @@ export function TrackedBillsView({ rows, loading, error, onSelectBill }: Tracked
         <div className="tracked-bills-empty">
           <WalletCards size={32} aria-hidden="true" />
           <h2>登録したお札はまだありません</h2>
-          <p>この端末から最初に登録したお札が、ここに表示されます。</p>
+          <p>最初に登録したお札が、ここに表示されます。</p>
         </div>
       ) : null}
       <div className="tracked-bills-list">

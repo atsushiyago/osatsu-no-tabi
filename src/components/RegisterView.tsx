@@ -4,7 +4,6 @@ import {
   Navigation,
   CheckCircle,
   AlertCircle,
-  HelpCircle,
   Sparkles,
   Lock,
   Loader2,
@@ -747,7 +746,9 @@ export const RegisterView = ({
           <div className="form-label location-form-label">
             <span>3. 現在の地域（市区町村まで）</span>
           </div>
-          <p className="location-privacy-note">正確な住所は保存しません</p>
+          <p className="location-privacy-note">
+            位置情報の自動設定は任意です。保存するのは市区町村までで、GPS座標や正確な住所は保存・公開しません。
+          </p>
 
           <button
             type="button"
@@ -815,10 +816,6 @@ export const RegisterView = ({
             </div>
           </div>
 
-          <p className="input-hint" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
-            <HelpCircle size={13} />
-            <span>正確なGPS座標は一切保存・公開されず、市区町村の代表点として丸められます。</span>
-          </p>
         </div>
 
         {/* 旅のひと言メモ（任意） */}

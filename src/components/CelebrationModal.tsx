@@ -211,11 +211,11 @@ export const CelebrationModal = ({
         </div>
 
         <div className="registration-return-note celebration-return-note" role="status">
-          <p>このお札が、どこかでまた見つかるかもしれません。</p>
+          <p>このお札を手元に保管する必要はありません。いつも通りお使いください。</p>
           <p>数週間したら、また旅の続きを見にきてください。</p>
           {onViewTrackedBills && (
             <button className="registration-return-link" onClick={onViewTrackedBills}>
-              この端末のお札を見る
+              登録したお札を見る
             </button>
           )}
         </div>

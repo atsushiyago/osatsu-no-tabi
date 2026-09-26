@@ -274,14 +274,27 @@ export const BillDetailView = ({
         </div>
       </div>
 
+      {/* 紙幣概要の直後に再発見操作を案内 */}
+      <section className="detail-rediscovery-action" aria-labelledby="detail-rediscovery-title">
+        <h3 id="detail-rediscovery-title">このお札を見つけた方へ</h3>
+        <p>このお札が今あなたの手元にあるなら、<br className="detail-rediscovery-copy-break" />ここで再発見を記録できます。</p>
+        <button
+          className="detail-rediscovery-button"
+          onClick={() => onRegisterAgain(serialNumber)}
+          id="btn-re-register-this"
+        >
+          <span>この場所で再発見を記録</span>
+        </button>
+      </section>
+
       {registrationCompleted && (
         <aside className="registration-return-note" aria-labelledby="registration-return-title" role="status">
           <h2 id="registration-return-title">登録しました</h2>
-          <p>このお札が、どこかでまた見つかるかもしれません。</p>
+          <p>このお札を手元に保管する必要はありません。いつも通りお使いください。</p>
           <p>数週間したら、また旅の続きを見にきてください。</p>
           {showTrackedBillsLink && onNavigateTrackedBills && (
             <button className="registration-return-link" onClick={onNavigateTrackedBills}>
-              この端末のお札を見る
+              登録したお札を見る
             </button>
           )}
         </aside>
@@ -447,18 +460,6 @@ export const BillDetailView = ({
         </div>
       </section>
 
-      {/* 紙幣が手元にあるときの再発見記録 */}
-      <section className="detail-rediscovery-action" aria-labelledby="detail-rediscovery-title">
-        <h3 id="detail-rediscovery-title">次にこのお札を見つけたら</h3>
-        <p>このお札が今あなたの手元にあるなら、<br className="detail-rediscovery-copy-break" />ここで再発見を記録できます。</p>
-        <button
-          className="detail-rediscovery-button"
-          onClick={() => onRegisterAgain(serialNumber)}
-          id="btn-re-register-this"
-        >
-          <span>この場所で再発見を記録</span>
-        </button>
-      </section>
     </div>
   );
 };

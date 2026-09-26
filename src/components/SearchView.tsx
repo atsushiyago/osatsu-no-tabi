@@ -169,11 +169,11 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           </div>
 
           <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#282a27', marginBottom: '8px' }}>
-            このお札はまだ登録されていません
+            この記番号のお札は、このサービスにはまだ登録されていません。
           </h3>
 
           <p style={{ fontSize: '16px', color: '#494b46', lineHeight: 1.6, marginBottom: '18px' }}>
-            記番号「{formatSerialDisplay(searchedSerial)}」はまだ誰も見つけていない新しいお札です。
+            記番号「{formatSerialDisplay(searchedSerial)}」を最初に登録して、旅の記録を始められます。
             <br />
             <strong>あなたが最初の発見者になりませんか？</strong>
           </p>

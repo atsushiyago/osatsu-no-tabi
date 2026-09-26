@@ -229,7 +229,7 @@ export function App() {
       <main className="main-content">
         {currentView === 'bill' && trackingNotice && (
           <p className="tracked-bills-warning" role="status">
-            登録は完了しましたが、この端末の一覧には保存できませんでした。
+            登録は完了しましたが、「登録したお札」の一覧には保存できませんでした。
           </p>
         )}
         {currentView === 'home' && (
@@ -280,7 +280,7 @@ export function App() {
         )}
         {currentView === 'tracked' && authReady && !authUid && (
           <div className="tracked-bills-unavailable">
-            <h1>この端末で登録したお札</h1>
+            <h1>登録したお札</h1>
             <p>現在この機能を利用できません。公開中のお札の検索や閲覧は引き続き利用できます。</p>
           </div>
         )}
@@ -322,7 +322,7 @@ export function App() {
             id="nav-tracked-bills"
           >
             <WalletCards size={20} />
-            <span>この端末のお札</span>
+            <span>登録したお札</span>
           </button>
         )}
       </nav>
