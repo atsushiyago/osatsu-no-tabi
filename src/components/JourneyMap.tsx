@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Sighting } from '../types';
+import { getMunicipalityLocation } from '../utils/geo';
 
 interface JourneyMapProps {
   sightings: Sighting[];
@@ -52,10 +53,11 @@ export const JourneyMap = ({
       return;
     }
 
-    const latLngs: [number, number][] = sightings.map((s) => [
-      s.latitudeApprox,
-      s.longitudeApprox,
-    ]);
+    const locatedSightings = sightings
+      .map((s) => ({ sighting: s, location: getMunicipalityLocation(s.prefecture, s.municipality) }))
+      .filter((entry): entry is { sighting: Sighting; location: NonNullable<typeof entry.location> } => Boolean(entry.location));
+    if (locatedSightings.length === 0) return;
+    const latLngs: [number, number][] = locatedSightings.map(({ location }) => [location.lat, location.lng]);
 
     // 軌跡のポリラインを描画
     if (latLngs.length > 1) {
@@ -70,7 +72,7 @@ export const JourneyMap = ({
     }
 
     // 各地点のピンマーカーを生成
-    sightings.forEach((s, idx) => {
+    locatedSightings.forEach(({ sighting: s, location }, idx) => {
       const isFirst = idx === 0;
       const isLatest = idx === sightings.length - 1 && sightings.length > 1;
 
@@ -134,7 +136,7 @@ export const JourneyMap = ({
         </div>
       `;
 
-      L.marker([s.latitudeApprox, s.longitudeApprox], { icon: customIcon })
+      L.marker([location.lat, location.lng], { icon: customIcon })
         .bindPopup(popupContent)
         .addTo(map);
     });

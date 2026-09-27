@@ -102,6 +102,11 @@ export function getCitiesByPrefecture(pref: string): CityLocation[] {
   return JAPAN_CITIES.filter(c => c.pref === pref);
 }
 
+/** Return the bundled municipality representative point; never store user GPS in Firestore. */
+export function getMunicipalityLocation(pref: string, municipality: string): CityLocation | undefined {
+  return JAPAN_CITIES.find((city) => city.pref === pref && city.city === municipality);
+}
+
 // ハバーサインの公式により2点間の距離(km)を計算
 export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   if (lat1 === lat2 && lon1 === lon2) return 0;

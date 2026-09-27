@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "preview:cf": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "test:rules": "firebase emulators:exec --only firestore,auth \"node test/runner.cjs\"",
+    "test:rules": "firebase --config firebase.json emulators:exec --only firestore,auth \"node test/strict-rules.runner.cjs\"",
     "test:rules:strict": "firebase --config firebase.strict.json emulators:exec --only firestore,auth \"node test/strict-rules.runner.cjs\"",
     "test:auth": "node --test test/anonymous-session.test.js",
     "test:serial-input": "node --test test/serial-input.test.js",

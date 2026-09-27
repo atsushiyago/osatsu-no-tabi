@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import {
   Camera,
   Navigation,
@@ -11,9 +11,9 @@ import {
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
 import { useSerialInput } from '../hooks/useSerialInput';
-import { recognizeBanknoteSerialFromImage, analyzeBlobStats, type OcrSerialCandidate } from '../utils/ocr.ts';
-import { CropModal, type CropMetadata } from './CropModal';
-import { OcrDebugPanel, type OcrDebugData } from './OcrDebugPanel';
+import type { OcrSerialCandidate } from '../utils/ocr.ts';
+import type { CropMetadata } from './CropModal';
+import type { OcrDebugData } from './OcrDebugPanel';
 import { isDebugTiming } from '../utils/debug';
 import {
   PREFECTURES,
@@ -29,12 +29,12 @@ import {
 import {
   registerBillSighting,
   getBillBySerial,
-  initializeLegacyBillCooldown,
   RegistrationRateLimitError,
 } from '../services/billService';
-import { trackFirstRegisteredBill } from '../services/trackedBills';
 
 const BILL_COOLDOWN_MS = 15 * 60 * 1000;
+const LazyCropModal = lazy(() => import('./CropModal').then(({ CropModal }) => ({ default: CropModal })));
+const LazyOcrDebugPanel = lazy(() => import('./OcrDebugPanel').then(({ OcrDebugPanel }) => ({ default: OcrDebugPanel })));
 
 function getTimestampMillis(value: BillWithSightings['lastSightedAtServer']): number | null {
   if (typeof value === 'string') {
@@ -56,14 +56,12 @@ function cooldownMessage(remainingMs: number): string {
 
 interface RegisterViewProps {
   initialSerial?: string;
-  userUid?: string | null;
   onSuccess: (result: RegisterResult, trackingFailed?: boolean) => void;
   onCancel: () => void;
 }
 
 export const RegisterView = ({
   initialSerial = '',
-  userUid,
   onSuccess,
   onCancel,
 }: RegisterViewProps) => {
@@ -148,17 +146,20 @@ export const RegisterView = ({
     let emittedOcrError = false;
 
     try {
+      if (isTimingDebug) setOcrStatusMessage('OCRを読み込み中…');
+      const ocr = await import('../utils/ocr.ts');
+
       if (isTimingDebug && rawFile) {
         const rawImageUrl = URL.createObjectURL(rawFile);
         const croppedImageUrl = URL.createObjectURL(croppedBlob);
         debugUrlsRef.current.push(rawImageUrl, croppedImageUrl);
         setOcrDebugData({ rawImageUrl, croppedImageUrl, cropMetadata: metadata, passes: [] });
-        void Promise.all([analyzeBlobStats(rawFile), analyzeBlobStats(croppedBlob)]).then(([rawStats, croppedStats]) => {
+        void Promise.all([ocr.analyzeBlobStats(rawFile), ocr.analyzeBlobStats(croppedBlob)]).then(([rawStats, croppedStats]) => {
           setOcrDebugData((current) => current ? { ...current, rawStats, croppedStats } : current);
         }).catch((error) => console.warn('Failed to analyze OCR debug images:', error));
       }
 
-      const candidates = await recognizeBanknoteSerialFromImage(
+      const candidates = await ocr.recognizeBanknoteSerialFromImage(
         croppedBlob,
         (msg) => {
           setOcrStatusMessage(msg);
@@ -341,19 +342,11 @@ export const RegisterView = ({
 
     setIsSubmitting(true);
 
-    let billForSubmit = existingBill?.serialNumber === normSerial ? existingBill : null;
+    let billForSubmit = existingBill;
     try {
       if (billForSubmit && !getTimestampMillis(billForSubmit.lastSightedAtServer)) {
-        const initialized = await initializeLegacyBillCooldown(normSerial);
-        const refreshedBill = await getBillBySerial(normSerial);
-        if (refreshedBill) {
-          billForSubmit = refreshedBill;
-          setExistingBill(refreshedBill);
-        }
-        if (initialized && billForSubmit) {
-          setErrorMessage(cooldownMessage(getCooldownRemainingMs(billForSubmit)));
-          return;
-        }
+        setErrorMessage('旅の記録を確認できませんでした。もう一度検索してください。');
+        return;
       }
 
       if (billForSubmit) {
@@ -375,16 +368,7 @@ export const RegisterView = ({
         userNote,
       });
 
-      let trackingFailed = false;
-      if (!result.isRediscovery && userUid) {
-        try {
-          await trackFirstRegisteredBill(userUid, result.bill, result.newSighting.municipality);
-        } catch (trackingError) {
-          console.warn('Bill registered publicly but could not be saved to this-device list:', trackingError);
-          trackingFailed = true;
-        }
-      }
-      onSuccess(result, trackingFailed);
+      onSuccess(result, false);
     } catch (err: any) {
       console.error('Registration failed:', err);
       if (err instanceof RegistrationRateLimitError) {
@@ -754,13 +738,15 @@ export const RegisterView = ({
         </div>
 
         {isTimingDebug && ocrDebugData && (
-          <OcrDebugPanel
-            data={ocrDebugData}
-            onPrepareNextCapture={(message) => {
-              setOcrCandidates([]);
-              setOcrMessage({ type: 'info', text: message });
-            }}
-          />
+          <Suspense fallback={<p role="status">OCR診断を読み込み中…</p>}>
+            <LazyOcrDebugPanel
+              data={ocrDebugData}
+              onPrepareNextCapture={(message) => {
+                setOcrCandidates([]);
+                setOcrMessage({ type: 'info', text: message });
+              }}
+            />
+          </Suspense>
         )}
 
         {/* 現在地選択 */}
@@ -901,11 +887,13 @@ export const RegisterView = ({
 
       {/* 記番号切り抜きモーダル */}
       {isTimingDebug && pendingImageFile && (
-        <CropModal
-          imageFile={pendingImageFile}
-          onCrop={handleCropComplete}
-          onCancel={handleCropCancel}
-        />
+        <Suspense fallback={<p role="status">クロップ画面を読み込み中…</p>}>
+          <LazyCropModal
+            imageFile={pendingImageFile}
+            onCrop={handleCropComplete}
+            onCancel={handleCropCancel}
+          />
+        </Suspense>
       )}
 
     </div>

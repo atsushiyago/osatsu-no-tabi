@@ -1,11 +1,12 @@
-import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, type Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc, type Timestamp } from 'firebase/firestore';
 import { db } from './firebase';
-import type { Bill, BillWithSightings } from '../types';
-import { getBillBySerial } from './billService';
+import type { BillWithSightings } from '../types';
+import { getPublicBillById } from './billService';
 import { resolveLastSeenBaseline, sortTrackedBillRows } from '../utils/trackedBillState.js';
 
 export interface TrackedBillRow {
   bill: BillWithSightings;
+  serialNumber: string;
   createdAt: Timestamp | null;
   firstRegisteredByMe: true;
   notifyOnRediscovery: boolean;
@@ -15,28 +16,17 @@ export interface TrackedBillRow {
   unseenSightingsCount: number;
 }
 
-export async function trackFirstRegisteredBill(uid: string, bill: Bill, municipality: string): Promise<void> {
-  if (!db) throw new Error('Firestore is unavailable');
-  const trackedRef = doc(db, 'users', uid, 'trackedBills', bill.id);
-  await setDoc(trackedRef, {
-    billId: bill.id,
-    createdAt: serverTimestamp(),
-    firstRegisteredByMe: true,
-    notifyOnRediscovery: false,
-    lastSeenSightingsCount: bill.sightingsCount,
-    lastSeenAt: serverTimestamp(),
-    lastSeenMunicipality: municipality,
-  });
-}
-
 export async function getTrackedBills(uid: string): Promise<TrackedBillRow[]> {
   const firestore = db;
   if (!firestore) throw new Error('Firestore is unavailable');
   const trackedSnap = await getDocs(collection(firestore, 'users', uid, 'trackedBills'));
   const rows = await Promise.all(trackedSnap.docs.map(async (trackedDoc) => {
     const entry = trackedDoc.data();
-    if (typeof entry.billId !== 'string') return null;
-    const bill = await getBillBySerial(entry.billId);
+    // Rediscovery-created private records hold serial proof for Firestore Rules,
+    // but are not bills originally registered by this user.
+    if (entry.firstRegisteredByMe !== true) return null;
+    if (typeof entry.publicBillId !== 'string' || typeof entry.serialNumber !== 'string') return null;
+    const bill = await getPublicBillById(entry.publicBillId);
     if (!bill) return null;
     const baseline = resolveLastSeenBaseline(bill.sightingsCount, entry.lastSeenSightingsCount as number | undefined);
     const lastSeenSightingsCount = baseline.lastSeenSightingsCount;
@@ -54,6 +44,7 @@ export async function getTrackedBills(uid: string): Promise<TrackedBillRow[]> {
 
     return {
       bill,
+      serialNumber: entry.serialNumber,
       createdAt: (entry.createdAt as Timestamp | undefined) ?? null,
       firstRegisteredByMe: true,
       notifyOnRediscovery: entry.notifyOnRediscovery === true,

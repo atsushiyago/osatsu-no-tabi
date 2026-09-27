@@ -4,6 +4,8 @@ import { calculateDistanceKm } from '../utils/geo';
 /** Display-only examples. These IDs are intentionally not valid serial numbers. */
 export interface SampleJourney extends BillWithSightings {
   isSample: true;
+  /** Synthetic local-only label; sample journeys never enter Firestore. */
+  serialNumber: string;
 }
 
 type SampleRoute = readonly [

@@ -1,13 +1,12 @@
 import { ArrowRight, WalletCards } from 'lucide-react';
 import type { TrackedBillRow } from '../services/trackedBills';
-import { formatSerialDisplay } from '../utils/serial';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 
 interface TrackedBillsViewProps {
   rows: TrackedBillRow[];
   loading: boolean;
   error: boolean;
-  onSelectBill: (serial: string) => void;
+  onSelectBill: (publicBillId: string) => void;
 }
 
 export function TrackedBillsView({ rows, loading, error, onSelectBill }: TrackedBillsViewProps) {
@@ -42,10 +41,10 @@ export function TrackedBillsView({ rows, loading, error, onSelectBill }: Tracked
             <button
               className="tracked-bill-card"
               key={bill.id}
-              onClick={() => onSelectBill(bill.serialNumber)}
+              onClick={() => onSelectBill(bill.id)}
             >
               <span className="tracked-bill-card-main">
-                <strong>{formatSerialDisplay(bill.serialNumber)}</strong>
+                <strong>{row.serialNumber}</strong>
                 {row.unseenSightingsCount > 0 && (
                   <span className="tracked-bill-new-badge">
                     新しい発見あり +{row.unseenSightingsCount}

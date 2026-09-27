@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Search, Compass, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
+import { Search, Compass, CheckCircle, AlertCircle } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
-import { formatSerialDisplay } from '../utils/serial';
 import { prepareSerialSearch, runValidatedSerialSearch } from '../utils/serialSearch';
 import { useSerialInput } from '../hooks/useSerialInput';
 import { isDebugTiming } from '../utils/debug';
@@ -24,7 +23,6 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const normSerial = searchInput;
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,12 +34,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     const request = prepareSerialSearch(rawInput);
     if (!request.serial) return;
 
-    if (isDebugTiming()) {
-      console.debug('[Search Debug] raw input=', rawInput);
-      console.debug('[Search Debug] normalized input=', request.serial);
-      console.debug('[Search Debug] search serial=', request.serial);
-      console.debug('[Search Debug] target document ID=', request.documentId);
-    }
+    if (isDebugTiming()) console.debug('[Search Debug] serialIndex exact lookup requested');
 
     setNotFound(false);
     setSearchInput(request.serial);
@@ -60,10 +53,9 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
         return;
       }
 
-      const { serial } = searchResult.request;
       const bill = searchResult.result;
       if (bill) {
-        onBillFound(serial);
+        onBillFound(bill.id);
       } else {
         setNotFound(true);
       }
@@ -73,12 +65,6 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     } finally {
       setIsSearching(false);
     }
-  };
-
-  const handleSampleClick = (serial: string) => {
-    setSearchInput(serial);
-    setNotFound(false);
-    onBillFound(serial);
   };
 
   return (
@@ -138,7 +124,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
             >
               {validation.isValid ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
               {validation.isValid ? (
-                <span>正規化記番号: <strong>{formatSerialDisplay(normSerial)}</strong></span>
+                <span>記番号の形式は正しいです</span>
               ) : (
                 <span>{validation.message}</span>
               )}
@@ -191,7 +177,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           </h3>
 
           <p style={{ fontSize: '16px', color: '#494b46', lineHeight: 1.6, marginBottom: '18px' }}>
-            記番号「{formatSerialDisplay(searchedSerial)}」を最初に登録して、旅の記録を始められます。
+            入力した記番号を最初に登録して、旅の記録を始められます。
             <br />
             <strong>あなたが最初の発見者になりませんか？</strong>
           </p>
@@ -206,39 +192,6 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
         </div>
       )}
 
-      {/* サンプル記番号ですぐ試す */}
-      <div style={{ marginTop: '24px' }}>
-        <h4 style={{ fontSize: '13px', fontWeight: 700, color: '#64748b', marginBottom: '10px' }}>
-          登録済みのお札のサンプルを見てみる:
-        </h4>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => handleSampleClick('AA123456B')}
-            style={{ justifyContent: 'space-between', padding: '12px 14px', fontSize: '13px' }}
-          >
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: 800, fontFamily: 'monospace' }}>AA 123456 B</div>
-              <div style={{ fontSize: '11px', color: '#64748b' }}>千円札 / 4回発見 (大和→新宿→名古屋→京都)</div>
-            </div>
-            <ArrowRight size={16} color="#64748b" />
-          </button>
-
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => handleSampleClick('BC987654A')}
-            style={{ justifyContent: 'space-between', padding: '12px 14px', fontSize: '13px' }}
-          >
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: 800, fontFamily: 'monospace' }}>BC 987654 A</div>
-              <div style={{ fontSize: '11px', color: '#64748b' }}>一万円札 / 2回発見 (福岡→札幌・長距離)</div>
-            </div>
-            <ArrowRight size={16} color="#64748b" />
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

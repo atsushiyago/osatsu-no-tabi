@@ -1,1 +1,1 @@
-import('./strict-rules.test.js');
+import('./public-serial-rules.test.js');

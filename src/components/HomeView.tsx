@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import type { GlobalStats, BillWithSightings } from '../types';
 import { getGlobalStats, getRecentJourneys } from '../services/billService';
-import { formatSerialDisplay } from '../utils/serial';
 import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
 import type { TrackedBillRow } from '../services/trackedBills';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
@@ -19,7 +18,7 @@ import { getLatestPublicSightingRoute } from '../utils/journeyRoute';
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
   onNavigateSearch: () => void;
-  onSelectBill: (serial: string) => void;
+  onSelectBill: (publicBillId: string) => void;
   trackedBills: TrackedBillRow[] | null;
   onNavigateTrackedBills: () => void;
 }
@@ -219,11 +218,11 @@ export const HomeView = ({
                 <div
                   key={b.id}
                   className="journey-row"
-                  onClick={isSample ? undefined : () => onSelectBill(b.serialNumber)}
+                  onClick={isSample ? undefined : () => onSelectBill(b.id)}
                   onKeyDown={isSample ? undefined : (event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      onSelectBill(b.serialNumber);
+                      onSelectBill(b.id);
                     }
                   }}
                   role={isSample ? undefined : 'button'}
@@ -271,7 +270,7 @@ export const HomeView = ({
                           color: '#334155',
                         }}
                       >
-                        {isSample ? '架空ID ' + b.id : formatSerialDisplay(b.serialNumber)}
+                        {isSample ? 'サンプル旅 ' + b.id.slice(-3) : `旅するお札 #${b.id.slice(0, 4).toUpperCase()}`}
                       </span>
                     </div>
 

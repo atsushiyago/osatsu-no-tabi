@@ -3,8 +3,7 @@ import type { Timestamp } from 'firebase/firestore';
 export type Denomination = 1000 | 5000 | 10000;
 
 export interface Bill {
-  id: string; // bill document id or normalized serial number
-  serialNumber: string; // e.g. "AA123456B"
+  id: string; // opaque publicBillId
   denomination: Denomination;
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
@@ -12,18 +11,22 @@ export interface Bill {
   totalDistanceKm: number;
   firstSightedAt: string;
   lastSightedAt: string;
+  lastSightingId?: string;
+  lastMunicipality?: string;
   /** Server-only enforcement clock used by Firestore Rules; absent on legacy bills until lazily migrated. */
   lastSightedAtServer?: Timestamp | string;
 }
 
 export interface Sighting {
   id: string;
-  billId: string;
+  publicBillId?: string;
+  /** Legacy-shaped fields are used only by Firestore-external sample journeys. */
+  billId?: string;
   step: number; // 1, 2, 3...
   prefecture: string;
   municipality: string;
-  latitudeApprox: number;
-  longitudeApprox: number;
+  latitudeApprox?: number;
+  longitudeApprox?: number;
   userNote?: string;
   createdAt: string; // ISO string
   distanceFromPrevKm?: number;

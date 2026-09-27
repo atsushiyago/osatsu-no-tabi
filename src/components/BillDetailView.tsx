@@ -9,23 +9,22 @@ import {
   Navigation,
 } from 'lucide-react';
 import type { BillWithSightings } from '../types';
-import { getBillBySerial } from '../services/billService';
+import { getPublicBillById } from '../services/billService';
 import { JourneyMap } from './JourneyMap';
-import { formatSerialDisplay } from '../utils/serial';
 import { markTrackedBillSeen } from '../services/trackedBills';
 
 interface BillDetailViewProps {
-  serialNumber: string;
+  publicBillId: string;
   userUid?: string | null;
   registrationCompleted?: boolean;
   showTrackedBillsLink?: boolean;
   onNavigateTrackedBills?: () => void;
   onBack: () => void;
-  onRegisterAgain: (serial: string) => void;
+  onRegisterAgain: () => void;
 }
 
 export const BillDetailView = ({
-  serialNumber,
+  publicBillId,
   userUid,
   registrationCompleted = false,
   showTrackedBillsLink = false,
@@ -41,7 +40,7 @@ export const BillDetailView = ({
     async function loadBill() {
       setLoading(true);
       try {
-        const data = await getBillBySerial(serialNumber);
+        const data = await getPublicBillById(publicBillId);
         setBillData(data);
       } catch (err) {
         console.error('Failed to load bill detail', err);
@@ -50,7 +49,7 @@ export const BillDetailView = ({
       }
     }
     loadBill();
-  }, [serialNumber]);
+  }, [publicBillId]);
 
   useEffect(() => {
     if (!userUid || loading || !billData) return;
@@ -69,7 +68,7 @@ export const BillDetailView = ({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `お札の旅 - ${billData?.denomination}円札 (${serialNumber})`,
+          title: `お札の旅 - ${billData?.denomination}円札`,
           text: `この${billData?.denomination}円札は${billData?.sightingsCount}回発見され、日本を約${billData?.totalDistanceKm}km旅しています！`,
           url,
         });
@@ -104,10 +103,10 @@ export const BillDetailView = ({
           お札が見つかりませんでした
         </h3>
         <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px' }}>
-          記番号「{serialNumber}」はまだ登録されていません。
+          指定された旅の記録は見つかりませんでした。
         </p>
-        <button className="btn-primary" onClick={() => onRegisterAgain(serialNumber)}>
-          このお札を登録する
+        <button className="btn-primary" onClick={onRegisterAgain}>
+          手元のお札の記番号を入力して再発見を記録
         </button>
       </div>
     );
@@ -231,7 +230,7 @@ export const BillDetailView = ({
             marginBottom: '16px',
           }}
         >
-          {formatSerialDisplay(serialNumber)}
+          旅するお札 #{publicBillId.slice(0, 4).toUpperCase()}
         </div>
 
         {/* 4つの主要指標 */}
@@ -280,7 +279,7 @@ export const BillDetailView = ({
         <p>このお札が今あなたの手元にあるなら、<br className="detail-rediscovery-copy-break" />ここで再発見を記録できます。</p>
         <button
           className="detail-rediscovery-button"
-          onClick={() => onRegisterAgain(serialNumber)}
+          onClick={onRegisterAgain}
           id="btn-re-register-this"
         >
           <span>この場所で再発見を記録</span>

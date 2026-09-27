@@ -6,7 +6,6 @@ import { SearchView } from './components/SearchView';
 import { BillDetailView } from './components/BillDetailView';
 import { CelebrationModal } from './components/CelebrationModal';
 import type { RegisterResult } from './types';
-import { normalizeSerialNumber } from './utils/serial';
 import { isFirebaseConfigured } from './services/firebase';
 import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
@@ -23,13 +22,13 @@ type TrackedBillsLoadResult = {
 
 export function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('home');
-  const [selectedSerial, setSelectedSerial] = useState<string>('');
+  const [selectedPublicBillId, setSelectedPublicBillId] = useState<string>('');
   const [registerInitialSerial, setRegisterInitialSerial] = useState<string>('');
   const [celebrationResult, setCelebrationResult] = useState<RegisterResult | null>(null);
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(!auth);
   const [trackingNotice, setTrackingNotice] = useState(false);
-  const [registrationCompletedSerial, setRegistrationCompletedSerial] = useState<string | null>(null);
+  const [registrationCompletedBillId, setRegistrationCompletedBillId] = useState<string | null>(null);
   const [registrationTrackedBillsAvailable, setRegistrationTrackedBillsAvailable] = useState(false);
   const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
   const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
@@ -90,21 +89,20 @@ export function App() {
   const trackedBillsLoading = hasTrackedBillsView && Boolean(authUid) && !currentTrackedBillsResult;
   const trackedBillsError = currentTrackedBillsResult?.error ?? false;
 
-  // URLハッシュまたはパスのパース (/bill/:serial)
+      // Public detail routes contain only opaque IDs.
   useEffect(() => {
     const handleUrlChange = () => {
       setRouteRevision((revision) => revision + 1);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
 
-      // #/bill/XXXX または /bill/XXXX に対応
-      const billMatch = hash.match(/#\/bill\/([A-Za-z0-9]+)/) || pathname.match(/\/bill\/([A-Za-z0-9]+)/);
+      const billMatch = hash.match(/#\/bill\/([a-f0-9-]{36})/i) || pathname.match(/\/bill\/([a-f0-9-]{36})/i);
       if (!billMatch) {
-        setRegistrationCompletedSerial(null);
+        setRegistrationCompletedBillId(null);
         setRegistrationTrackedBillsAvailable(false);
       }
       if (billMatch && billMatch[1]) {
-        setSelectedSerial(normalizeSerialNumber(billMatch[1]));
+        setSelectedPublicBillId(billMatch[1]);
         setCurrentView('bill');
       } else if (hash === '#/register') {
         setCurrentView('register');
@@ -127,20 +125,19 @@ export function App() {
     };
   }, []);
 
-  const navigateTo = (view: ViewMode, serial?: string, keepRegistrationNotice = false) => {
+  const navigateTo = (view: ViewMode, identifier?: string, keepRegistrationNotice = false) => {
     setRouteRevision((revision) => revision + 1);
     if (!keepRegistrationNotice) {
-      setRegistrationCompletedSerial(null);
+      setRegistrationCompletedBillId(null);
       setRegistrationTrackedBillsAvailable(false);
     }
-    if (view === 'bill' && serial) {
-      const norm = normalizeSerialNumber(serial);
-      setSelectedSerial(norm);
+    if (view === 'bill' && identifier) {
+      setSelectedPublicBillId(identifier);
       setCurrentView('bill');
-      window.location.hash = `#/bill/${norm}`;
+      window.location.hash = `#/bill/${identifier}`;
     } else if (view === 'register') {
-      if (serial) {
-        setRegisterInitialSerial(serial);
+      if (identifier) {
+        setRegisterInitialSerial(identifier);
       } else {
         setRegisterInitialSerial('');
       }
@@ -163,14 +160,14 @@ export function App() {
   const handleRegisterSuccess = (result: RegisterResult, trackingFailed = false) => {
     setTrackingNotice(trackingFailed);
     if (result.isRediscovery) {
-      setRegistrationCompletedSerial(null);
+      setRegistrationCompletedBillId(null);
       // 再発見時の祝祭モーダルを表示
       setCelebrationResult(result);
     } else {
-      setRegistrationCompletedSerial(result.bill.serialNumber);
+      setRegistrationCompletedBillId(result.bill.id);
       setRegistrationTrackedBillsAvailable(Boolean(authUid && !trackingFailed));
       // 初回登録の場合も紙幣詳細ページへ
-      navigateTo('bill', result.bill.serialNumber, true);
+      navigateTo('bill', result.bill.id, true);
     }
   };
 
@@ -181,14 +178,14 @@ export function App() {
         <CelebrationModal
           result={celebrationResult}
           onClose={() => {
-            const serial = celebrationResult.bill.serialNumber;
+            const publicBillId = celebrationResult.bill.id;
             setCelebrationResult(null);
-            navigateTo('bill', serial);
+            navigateTo('bill', publicBillId);
           }}
           onViewJourney={() => {
-            const serial = celebrationResult.bill.serialNumber;
+            const publicBillId = celebrationResult.bill.id;
             setCelebrationResult(null);
-            navigateTo('bill', serial);
+            navigateTo('bill', publicBillId);
           }}
           onViewTrackedBills={authUid ? () => {
             setCelebrationResult(null);
@@ -236,7 +233,7 @@ export function App() {
           <HomeView
             onNavigateRegister={(serial) => navigateTo('register', serial)}
             onNavigateSearch={() => navigateTo('search')}
-            onSelectBill={(serial) => navigateTo('bill', serial)}
+            onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
             trackedBills={authUid ? trackedBills : null}
             onNavigateTrackedBills={() => navigateTo('tracked')}
           />
@@ -246,27 +243,26 @@ export function App() {
           <RegisterView
             initialSerial={registerInitialSerial}
             onSuccess={handleRegisterSuccess}
-            userUid={authUid}
             onCancel={() => navigateTo('home')}
           />
         )}
 
         {currentView === 'search' && (
           <SearchView
-            onBillFound={(serial) => navigateTo('bill', serial)}
+            onBillFound={(publicBillId) => navigateTo('bill', publicBillId)}
             onRegisterNew={(serial) => navigateTo('register', serial)}
           />
         )}
 
         {currentView === 'bill' && (
           <BillDetailView
-            serialNumber={selectedSerial}
+            publicBillId={selectedPublicBillId}
             userUid={authUid}
-            registrationCompleted={registrationCompletedSerial === selectedSerial}
+            registrationCompleted={registrationCompletedBillId === selectedPublicBillId}
             showTrackedBillsLink={registrationTrackedBillsAvailable}
             onNavigateTrackedBills={() => navigateTo('tracked')}
             onBack={() => navigateTo('home')}
-            onRegisterAgain={(serial) => navigateTo('register', serial)}
+            onRegisterAgain={() => navigateTo('register')}
           />
         )}
 
@@ -275,7 +271,7 @@ export function App() {
             rows={trackedBills ?? []}
             loading={trackedBillsLoading}
             error={trackedBillsError}
-            onSelectBill={(serial) => navigateTo('bill', serial)}
+            onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
           />
         )}
         {currentView === 'tracked' && authReady && !authUid && (
