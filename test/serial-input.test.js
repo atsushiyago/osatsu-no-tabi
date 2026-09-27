@@ -58,7 +58,12 @@ test('search validation rejects a serial that ends in a digit', () => {
   const result = prepareSerialSearch('M2607067');
   assert.equal(result.serial, 'M2607067');
   assert.equal(result.isValid, false);
-  assert.match(result.validationMessage ?? '', /記番号の形式を確認してください/);
+  assert.equal(result.validationMessage, '記番号の形式を確認してください。');
+});
+
+test('generic serial format errors omit examples while I/O errors stay specific', () => {
+  assert.equal(validateSerialNumber('A').message, '記番号の形式を確認してください。');
+  assert.equal(validateSerialNumber('AI123456BB').message, '記番号の英字には I（アイ）と O（オー）は使われません');
 });
 
 test('search validates after NFKC normalization', () => {

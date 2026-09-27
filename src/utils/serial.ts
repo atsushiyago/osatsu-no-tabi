@@ -46,8 +46,7 @@ export function validateSerialNumber(serial: string): {
   }
 
   const parts = norm.match(/^([A-Z]{1,2})([0-9]{6})([A-Z]{1,2})$/);
-  const examples = '例：AA123456BB（新紙幣） / A123456B・AA123456B（従来券）';
-  if (!parts) return { isValid: false, message: `記番号の形式を確認してください。${examples}` };
+  if (!parts) return { isValid: false, message: '記番号の形式を確認してください。' };
 
   if (/[IO]/.test(parts[1] + parts[3])) {
     return { isValid: false, message: '記番号の英字には I（アイ）と O（オー）は使われません' };
@@ -57,7 +56,7 @@ export function validateSerialNumber(serial: string): {
   const isLegacy = prefix.length >= 1 && prefix.length <= 2 && suffix.length === 1;
   const isNew = prefix.length === 2 && suffix.length === 2;
   if (!isLegacy && !isNew) {
-    return { isValid: false, message: `記番号の形式を確認してください。${examples}` };
+    return { isValid: false, message: '記番号の形式を確認してください。' };
   }
 
   const serialNumber = Number(digits);
