@@ -146,7 +146,7 @@ export function App() {
     } else if (view === 'search') {
       setCurrentView('search');
       window.location.hash = '#/search';
-    } else if (view === 'tracked' && authUid) {
+    } else if (view === 'tracked') {
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
@@ -273,6 +273,12 @@ export function App() {
             onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
           />
         )}
+        {currentView === 'tracked' && !authReady && (
+          <div className="tracked-bills-unavailable" role="status" aria-live="polite">
+            <h1>登録したお札</h1>
+            <p>登録したお札を準備しています…</p>
+          </div>
+        )}
         {currentView === 'tracked' && authReady && !authUid && (
           <div className="tracked-bills-unavailable">
             <h1>登録したお札</h1>
@@ -310,16 +316,14 @@ export function App() {
           <span>検索</span>
         </button>
 
-        {authReady && authUid && (
-          <button
-            className={`nav-item ${currentView === 'tracked' ? 'active' : ''}`}
-            onClick={() => navigateTo('tracked')}
-            id="nav-tracked-bills"
-          >
-            <WalletCards size={20} />
-            <span>登録したお札</span>
-          </button>
-        )}
+        <button
+          className={`nav-item ${currentView === 'tracked' ? 'active' : ''}`}
+          onClick={() => navigateTo('tracked')}
+          id="nav-tracked-bills"
+        >
+          <WalletCards size={20} />
+          <span>登録したお札</span>
+        </button>
       </nav>
       <TimingMonitor />
     </div>
