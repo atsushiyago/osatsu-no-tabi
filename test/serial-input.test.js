@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSerialInput } from '../src/utils/serial.ts';
+import { normalizeSerialInput, validateSerialNumber } from '../src/utils/serial.ts';
 import { prepareSerialSearch, runValidatedSerialSearch } from '../src/utils/serialSearch.ts';
 import {
   createSerialInputState,
@@ -12,6 +12,22 @@ import {
 
 test('full-width lowercase serial input becomes uppercase ASCII', () => {
   assert.equal(normalizeSerialInput('ｔｅ１９５１０１ｃ'), 'TE195101C');
+});
+
+test('日本銀行券の従来券・新紙幣形式と数字範囲を検証する', () => {
+  const valid = ['A123456B', 'AA123456B', 'AA123456BB', 'CD777777EF', 'AA000001AA', 'AA900000BB'];
+  const invalid = [
+    'A123456BB', 'A000000B', 'AA000000BB', 'AA900001BB', 'AI123456BB',
+    'AO123456BB', 'AA123456BI', 'AA123456BO', '123456', 'AA123456',
+  ];
+
+  for (const serial of valid) assert.equal(validateSerialNumber(serial).isValid, true, serial);
+  for (const serial of invalid) assert.equal(validateSerialNumber(serial).isValid, false, serial);
+  assert.match(validateSerialNumber('AI123456BB').message ?? '', /I（アイ）と O（オー）は使われません/);
+});
+
+test('lowercase/full-width input normalizes before validating the official format', () => {
+  assert.equal(validateSerialNumber(normalizeSerialInput('ａａ９０００００ｂｂ')).isValid, true);
 });
 
 test('serial input removes whitespace and non-alphanumeric characters', () => {
@@ -42,7 +58,7 @@ test('search validation rejects a serial that ends in a digit', () => {
   const result = prepareSerialSearch('M2607067');
   assert.equal(result.serial, 'M2607067');
   assert.equal(result.isValid, false);
-  assert.match(result.validationMessage ?? '', /記番号の形式が正しくありません/);
+  assert.match(result.validationMessage ?? '', /記番号の形式を確認してください/);
 });
 
 test('search validates after NFKC normalization', () => {
@@ -56,6 +72,10 @@ test('invalid search input never calls the Firestore lookup', async (t) => {
     ['digits only', '123'],
     ['clearly too short', 'AB12'],
     ['invalid final character', 'M2607061'],
+    ['old prefix with two suffix letters', 'A123456BB'],
+    ['zero numeric range', 'AA000000BB'],
+    ['excluded letter I', 'AI123456BB'],
+    ['numeric range above maximum', 'AA900001BB'],
   ];
 
   for (const [label, input] of inputs) {

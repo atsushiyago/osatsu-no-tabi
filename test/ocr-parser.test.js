@@ -14,7 +14,7 @@ test('OCR後補正は正しいrawを変更せず、NFKCと大文字化を適用�
 test('位置に応じて O/0, B/8, S/5, Z/2, G/6, T/7 を置換する', () => {
   const cases = [
     ['AA123O56B', 'AA123056B'],
-    ['0A123456B', 'OA123456B'],
+    ['0A123456B', 'QA123456B'],
     ['A1234B6C', 'A123486C'],
     ['A1234568', 'A123456B'],
     ['AA1234S6B', 'AA123456B'],
@@ -47,16 +47,13 @@ test('複数置換でも上限2文字を守り、補正数の少ない候補を�
   assert.strictEqual(tooManyCorrections.status, 'no-valid-candidate');
 });
 
-test('複数の有効候補は曖昧として確定しない', () => {
+test('I/Oは禁止文字として除外しつつ、誤認識候補の曖昧状態を維持する', () => {
   const result = correctOcrSerial('AA1234560');
 
-  assert.deepStrictEqual(result.validCandidates.map((candidate) => candidate.serial), [
-    'AA123456O',
-    'AA123456Q',
-  ]);
+  assert.deepStrictEqual(result.validCandidates.map((candidate) => candidate.serial), ['AA123456Q']);
   assert.strictEqual(result.selectedCandidate, null);
   assert.strictEqual(result.ambiguous, true);
-  assert.strictEqual(result.ambiguityReason, 'multiple-valid-candidates');
+  assert.strictEqual(result.ambiguityReason, 'possible-truncated-suffix');
 });
 
 test('AF8590708は末尾文字の欠落と置換を区別できないため採用候補にしない', () => {
@@ -74,9 +71,10 @@ test('AF8590708は末尾文字の欠落と置換を区別できないため採�
 test('無関係な文字列から番号を作らず、正常番号も別候補へ変えない', () => {
   assert.deepStrictEqual(correctOcrSerial('HELLO WORLD THIS IS A TEST').validCandidates, []);
 
-  const valid = correctOcrSerial('AA123456O');
-  assert.deepStrictEqual(valid.validCandidates, [{ serial: 'AA123456O', correctionCount: 0 }]);
-  assert.strictEqual(valid.selectedCandidate, 'AA123456O');
+  const valid = correctOcrSerial('AA123456B');
+  assert.deepStrictEqual(valid.validCandidates, [{ serial: 'AA123456B', correctionCount: 0 }]);
+  assert.strictEqual(valid.selectedCandidate, 'AA123456B');
+  assert.deepStrictEqual(correctOcrSerial('AA123456O').validCandidates, []);
 });
 
 test('標準的な記番号形式の認識 (AA123456A, A123456A, AA123456AA)', () => {
@@ -113,10 +111,10 @@ test('前後に不要文字があるOCR結果からの抽出', () => {
   assert.ok(res.includes('AA123456A'), '周囲の不要文字列からAA123456Aが抽出されること');
 });
 
-test('位置ベースの誤認識補正 (O/0, I/1, S/5, B/8, Z/2)', () => {
-  // 先頭の数字 '0' は英字 'O' に補正されるべき (0A123456B -> OA123456B)
+test('位置ベースの誤認識補正 (O/0, I/1, S/5, B/8, Z/2)は日銀形式でcandidate選別する', () => {
+  // 先頭の数字 '0' の代替Oは禁止文字なので除外、Qは有効候補として残る
   const res0 = extractSerialCandidates('0A123456B');
-  assert.ok(res0.includes('OA123456B'), '先頭0がOに補正されてOA123456Bになること');
+  assert.ok(res0.includes('QA123456B'), '先頭0から生成されたQ候補を残すこと');
 
   // 中央の英字 'S' は数字 '5' に補正されるべき (AA1234S6B -> AA123456B)
   const resS = extractSerialCandidates('AA1234S6B');
@@ -130,9 +128,9 @@ test('位置ベースの誤認識補正 (O/0, I/1, S/5, B/8, Z/2)', () => {
   const res8 = extractSerialCandidates('AA1234568');
   assert.ok(res8.includes('AA123456B'), '末尾8がBに補正されてAA123456Bになること');
 
-  // 末尾の数字 '0' は英字 'O' に補正されるべき (AA1234560 -> AA123456O)
+  // 末尾の数字 '0' からO/Qを試し、禁止文字Oを除外してQを残す
   const resZero = extractSerialCandidates('AA1234560');
-  assert.ok(resZero.includes('AA123456O'), '末尾0がOに補正されてAA123456Oになること');
+  assert.ok(resZero.includes('AA123456Q'), '末尾0から生成されたQ候補を残すこと');
 });
 
 test('候補なしのケース', () => {
@@ -147,11 +145,11 @@ test('候補なしのケース', () => {
 });
 
 test('複数候補が存在する場合の抽出と上限', () => {
-  const ocrText = 'AA123456A and BB987654C and CC112233D and DD445566E';
+  const ocrText = 'AA123456A and BB897654C and CC112233D and DD445566E';
   const res = extractSerialCandidates(ocrText, 3);
   assert.strictEqual(res.length, 3, '最大件数が3件に制限されること');
   assert.ok(res.includes('AA123456A'));
-  assert.ok(res.includes('BB987654C'));
+  assert.ok(res.includes('BB897654C'));
   assert.ok(res.includes('CC112233D'));
 });
 

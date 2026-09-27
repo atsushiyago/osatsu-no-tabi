@@ -20,7 +20,6 @@ interface BillDetailViewProps {
   showTrackedBillsLink?: boolean;
   onNavigateTrackedBills?: () => void;
   onBack: () => void;
-  onRegisterAgain: () => void;
 }
 
 export const BillDetailView = ({
@@ -30,7 +29,6 @@ export const BillDetailView = ({
   showTrackedBillsLink = false,
   onNavigateTrackedBills,
   onBack,
-  onRegisterAgain,
 }: BillDetailViewProps) => {
   const [billData, setBillData] = useState<BillWithSightings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,8 +103,8 @@ export const BillDetailView = ({
         <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px' }}>
           指定された旅の記録は見つかりませんでした。
         </p>
-        <button className="btn-primary" onClick={onRegisterAgain}>
-          手元のお札の記番号を入力して再発見を記録
+        <button className="btn-secondary" onClick={onBack}>
+          戻る
         </button>
       </div>
     );
@@ -272,19 +270,6 @@ export const BillDetailView = ({
           </div>
         </div>
       </div>
-
-      {/* 紙幣概要の直後に再発見操作を案内 */}
-      <section className="detail-rediscovery-action" aria-labelledby="detail-rediscovery-title">
-        <h3 id="detail-rediscovery-title">このお札を見つけた方へ</h3>
-        <p>このお札が今あなたの手元にあるなら、<br className="detail-rediscovery-copy-break" />ここで再発見を記録できます。</p>
-        <button
-          className="detail-rediscovery-button"
-          onClick={onRegisterAgain}
-          id="btn-re-register-this"
-        >
-          <span>この場所で再発見を記録</span>
-        </button>
-      </section>
 
       {registrationCompleted && (
         <aside className="registration-return-note" aria-labelledby="registration-return-title" role="status">

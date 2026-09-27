@@ -262,7 +262,6 @@ export function App() {
             showTrackedBillsLink={registrationTrackedBillsAvailable}
             onNavigateTrackedBills={() => navigateTo('tracked')}
             onBack={() => navigateTo('home')}
-            onRegisterAgain={() => navigateTo('register')}
           />
         )}
 

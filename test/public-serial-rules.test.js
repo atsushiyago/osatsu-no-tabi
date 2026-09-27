@@ -189,6 +189,15 @@ async function main() {
     if (b.data().serialNumber || b.data().normalizedSerial || s.data().billId || s.data().latitudeApprox) throw new Error('public serial/legacy field present');
     if (r.data().shortCount !== 1 || r.data().dailyCount !== 1) throw new Error('registration counted more than once');
   });
+  for (const acceptedSerial of ['A123456B', 'AA123456B', 'AA123456BB', 'CD777777EF', 'AA000001AA', 'AA900000BB']) {
+    await check(`Rules: official serial ${acceptedSerial} accepted`, async () => writeOperation(acceptedSerial));
+  }
+  for (const rejectedSerial of [
+    'A123456BB', 'A000000B', 'AA000000BB', 'AA900001BB', 'AI123456BB',
+    'AO123456BB', 'AA123456BI', 'AA123456BO', '123456', 'AA123456',
+  ]) {
+    await check(`Rules: invalid serial ${rejectedSerial} rejected`, async () => writeOperation(rejectedSerial), true);
+  }
   await check('serialIndex exact get許可', async () => { if (!(await getDoc(doc(db, 'serialIndex', initial.serial))).exists()) throw new Error('not found'); });
   await check('serialIndex collection list拒否', async () => getDocs(collection(db, 'serialIndex')), true);
   await check('serialIndex query拒否', async () => getDocs(query(collection(db, 'serialIndex'), where('publicBillId', '==', initial.publicBillId))), true);

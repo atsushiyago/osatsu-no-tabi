@@ -27,7 +27,8 @@ export function normalizeSerialInput(input: string): string {
 /**
  * 日本の紙幣記番号のフォーマットチェック
  * 主なパターン:
- * 1. [A-Z]{1,2}\d{6}[A-Z]{1,2} (現行新札および歴代日銀券)
+ * 1. [A-HJ-NP-Z]{1,2}\d{6}[A-HJ-NP-Z] (従来券)
+ * 2. [A-HJ-NP-Z]{2}\d{6}[A-HJ-NP-Z]{2} (2024年発行開始券)
  * 例:
  * - AA123456B
  * - A123456B
@@ -44,20 +45,24 @@ export function validateSerialNumber(serial: string): {
     return { isValid: false, message: '記番号を入力してください' };
   }
 
-  if (norm.length < 8 || norm.length > 10) {
-    return {
-      isValid: false,
-      message: '記番号は通常8〜10文字です（例: AA123456B または A123456B）',
-    };
+  const parts = norm.match(/^([A-Z]{1,2})([0-9]{6})([A-Z]{1,2})$/);
+  const examples = '例：AA123456BB（新紙幣） / A123456B・AA123456B（従来券）';
+  if (!parts) return { isValid: false, message: `記番号の形式を確認してください。${examples}` };
+
+  if (/[IO]/.test(parts[1] + parts[3])) {
+    return { isValid: false, message: '記番号の英字には I（アイ）と O（オー）は使われません' };
   }
 
-  // 正規表現: アルファベット1〜2文字 + 数字6桁 + アルファベット1〜2文字
-  const regex = /^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$/;
-  if (!regex.test(norm)) {
-    return {
-      isValid: false,
-      message: '記番号の形式が正しくありません（例: AA123456B, A123456B, AA123456BB）',
-    };
+  const [, prefix, digits, suffix] = parts;
+  const isLegacy = prefix.length >= 1 && prefix.length <= 2 && suffix.length === 1;
+  const isNew = prefix.length === 2 && suffix.length === 2;
+  if (!isLegacy && !isNew) {
+    return { isValid: false, message: `記番号の形式を確認してください。${examples}` };
+  }
+
+  const serialNumber = Number(digits);
+  if (serialNumber < 1 || serialNumber > 900000) {
+    return { isValid: false, message: '記番号の数字部分は000001〜900000です' };
   }
 
   return { isValid: true };
@@ -81,7 +86,13 @@ export async function hashSerialNumber(serial: string): Promise<string> {
  */
 export function formatSerialDisplay(serial: string): string {
   const norm = normalizeSerialNumber(serial);
-  const match = norm.match(/^([A-Z]{1,2})([0-9]{6})([A-Z]{1,2})$/);
+  const match = norm.match(/^([A-HJ-NP-Z]{1,2})([0-9]{6})([A-HJ-NP-Z]{1,2})$/);
   if (!match) return norm;
+  if (match[1].length === 1 && match[3].length !== 1) return norm;
+  if (match[1].length === 2 && match[3].length === 2) {
+    const value = Number(match[2]);
+    if (value < 1 || value > 900000) return norm;
+  } else if (match[1].length === 2 || match[3].length !== 1) return norm;
+  if (Number(match[2]) < 1 || Number(match[2]) > 900000) return norm;
   return `${match[1]} ${match[2]} ${match[3]}`;
 }

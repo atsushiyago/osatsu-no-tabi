@@ -18,7 +18,7 @@ service cloud.firestore {
       allow get: if request.auth != null;
       allow list: if false;
       allow create: if request.auth != null
-        && serial.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(serial)
         && request.resource.data.keys().hasOnly(['publicBillId', 'createdAt'])
         && request.resource.data.publicBillId is string
         && request.resource.data.createdAt is timestamp
@@ -54,6 +54,21 @@ service cloud.firestore {
 
     function isOpaquePublicBillId(value) {
       return value.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
+
+    // Bank of Japan formats: old notes use 1-2 prefix letters and 1 suffix;
+    // notes issued from 2024 use 2 prefix and 2 suffix letters. I/O are excluded.
+    // The numeric alternatives cover exactly 000001 through 900000.
+    function isValidSerial(value) {
+      return value is string && (
+        value.matches('^[A-HJ-NP-Z]{1,2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]$')
+        || value.matches('^[A-HJ-NP-Z]{2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]{2}$')
+      );
+    }
+
+    function containsValidSerial(value) {
+      return value.matches('.*[A-HJ-NP-Z]{1,2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z].*')
+        || value.matches('.*[A-HJ-NP-Z]{2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]{2}.*');
     }
 
     function isValidPublicBillCreate(publicBillId) {
@@ -110,7 +125,7 @@ service cloud.firestore {
         && data.distanceFromPrevKm is number && data.distanceFromPrevKm >= 0
         && data.daysFromPrev is number && data.daysFromPrev >= 0
         && (!('userNote' in data) || (data.userNote is string && data.userNote.size() <= 100
-          && !data.userNote.matches('.*[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}.*')));
+          && !containsValidSerial(data.userNote)));
     }
 
     function hasNewSchemaOperation(publicBillId) {
@@ -133,7 +148,7 @@ service cloud.firestore {
       return existsAfter(trackedPath)
         && trackedAfter.publicBillId == publicBillId
         && trackedAfter.serialNumber is string
-        && trackedAfter.serialNumber.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(trackedAfter.serialNumber)
         && existsAfter(serialPath)
         && getAfter(serialPath).data.publicBillId == publicBillId;
     }
@@ -192,7 +207,7 @@ service cloud.firestore {
         // ドキュメントIDと記番号の一致および日本銀行券の正規化形式検証
         && data.id == billId
         && data.serialNumber == billId
-        && data.serialNumber.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(data.serialNumber)
 
         // 額面は 1000円 / 5000円 / 10000円 のいずれか
         && data.denomination in [1000, 5000, 10000]
@@ -288,7 +303,7 @@ service cloud.firestore {
 
         // 基本フィールド型とフォーマット
         && data.id is string
-        && data.billId is string && data.billId.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(data.billId)
         && data.step is int && data.step >= 1
 
         // 地域（市区町村レベル）
@@ -333,7 +348,7 @@ service cloud.firestore {
         && data.dailyCount is int && data.dailyCount >= 1 && data.dailyCount <= 50
         && data.updatedAt is timestamp && data.updatedAt == request.time
         && data.lastOperationBillId is string
-        && data.lastOperationBillId.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(data.lastOperationBillId)
         && data.lastOperationSightingId is string
         && data.lastOperationSightingId.size() >= 1
         && data.lastOperationSightingId.size() <= 150;
@@ -428,7 +443,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['publicBillId', 'serialNumber', 'denomination', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
         && request.resource.data.publicBillId == billId
         && request.resource.data.serialNumber is string
-        && request.resource.data.serialNumber.matches('^[A-Z]{1,2}[0-9]{6}[A-Z]{1,2}$')
+        && isValidSerial(request.resource.data.serialNumber)
         && existsAfter(/databases/$(database)/documents/serialIndex/$(request.resource.data.serialNumber))
         && getAfter(/databases/$(database)/documents/serialIndex/$(request.resource.data.serialNumber)).data.publicBillId == billId
         && existsAfter(/databases/$(database)/documents/publicBills/$(billId))

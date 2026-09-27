@@ -89,7 +89,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               name="serial"
               type="text"
               className="text-input code-font"
-              placeholder="例: AA123456B"
+              placeholder="例: AA123456BB"
               value={searchInput}
               onChange={(e) => {
                 onSerialInputChange(e.target.value);
@@ -109,7 +109,10 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               enterKeyHint="done"
             />
           </div>
-          <p className="input-hint">全角・小文字でも自動変換します</p>
+          <p className="input-hint">
+            全角・小文字でも自動変換します<br />
+            例：AA123456BB（新紙幣） / A123456B・AA123456B（従来券）
+          </p>
           {searchInput && validation && (
             <div
               aria-live="polite"
