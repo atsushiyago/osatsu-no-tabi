@@ -357,13 +357,13 @@ body {
   outline-offset: 3px;
 }
 .home-return-note {
-  max-width: 64ch;
-  margin: -4px auto 26px;
-  padding: 2px 0 2px 14px;
-  border-left: 2px dotted #a84536;
+  max-width: 34ch;
+  margin: 12px auto 26px;
+  padding: 0;
   color: #30342f;
   font-size: 16px;
   line-height: 1.65;
+  text-align: center;
 }
 .home-return-note p { margin: 0; }
 .home-return-note-followup { color: #365d4a; font-weight: 750; }
