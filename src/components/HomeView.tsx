@@ -318,6 +318,16 @@ export const HomeView = ({
           </p>
         </div>
       </section>
+
+      <footer className="home-social-links" aria-label="外部リンク">
+        <a href="https://x.com/bicycle_geek" target="_blank" rel="noopener noreferrer">
+          𝕏 @bicycle_geek
+        </a>
+        <span aria-hidden="true">｜</span>
+        <a href="https://github.com/atsushiyago/osatsu-no-tabi" target="_blank" rel="noopener noreferrer">
+          GitHub
+        </a>
+      </footer>
     </div>
   );
 };
