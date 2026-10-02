@@ -1,16 +1,19 @@
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { Compass, PlusCircle, Search, WalletCards } from 'lucide-react';
+import type { FirebaseError } from 'firebase/app';
+import { GoogleAuthProvider, linkWithPopup, signInWithCredential, signInWithPopup } from 'firebase/auth';
 import { HomeView } from './components/HomeView';
 import { RegisterView } from './components/RegisterView';
 import { SearchView } from './components/SearchView';
 import { BillDetailView } from './components/BillDetailView';
 import { CelebrationModal } from './components/CelebrationModal';
 import type { RegisterResult } from './types';
-import { isFirebaseConfigured } from './services/firebase';
+import { auth, isFirebaseConfigured } from './services/firebase';
 import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
-import { auth, ensureAnonymousUser, observeAuthState } from './services/firebase';
+import { ensureAnonymousUser, observeAuthState } from './services/firebase';
 import { getTrackedBills, type TrackedBillRow } from './services/trackedBills';
+import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked';
 type TrackedBillsLoadResult = {
@@ -26,6 +29,11 @@ export function App() {
   const [registerInitialSerial, setRegisterInitialSerial] = useState<string>('');
   const [celebrationResult, setCelebrationResult] = useState<RegisterResult | null>(null);
   const [authUid, setAuthUid] = useState<string | null>(null);
+  const [authIsAnonymous, setAuthIsAnonymous] = useState(false);
+  const [authIsGoogleLinked, setAuthIsGoogleLinked] = useState(false);
+  const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [googleSyncError, setGoogleSyncError] = useState<string | null>(null);
+  const [googlePopupFallbackAvailable, setGooglePopupFallbackAvailable] = useState(false);
   const [authReady, setAuthReady] = useState(!auth);
   const [trackingNotice, setTrackingNotice] = useState(false);
   const [registrationCompletedBillId, setRegistrationCompletedBillId] = useState<string | null>(null);
@@ -53,6 +61,9 @@ export function App() {
   useEffect(() => {
     const unsubscribe = observeAuthState((user) => {
       setAuthUid(user?.uid ?? null);
+      const syncState = getGoogleSyncState(user);
+      setAuthIsAnonymous(syncState === 'anonymous');
+      setAuthIsGoogleLinked(syncState === 'linked');
       setAuthReady(true);
       if (!user) {
         void ensureAnonymousUser().catch((error) => {
@@ -171,6 +182,82 @@ export function App() {
     }
   };
 
+  const handleGoogleSync = async () => {
+    const currentUser = auth?.currentUser;
+    if (!currentUser || !currentUser.isAnonymous) return;
+
+    setGoogleSyncing(true);
+    setGoogleSyncError(null);
+    setGooglePopupFallbackAvailable(false);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      const result = await syncGoogleAccount({
+        user: currentUser,
+        provider,
+        link: async (user, googleProvider) => (await linkWithPopup(user, googleProvider)).user,
+        getCredentialFromError: (error) => GoogleAuthProvider.credentialFromError(error as FirebaseError),
+        signInWithCredential: async (credential) => (await signInWithCredential(auth!, credential)).user,
+        onUserSwitched: (user) => {
+          setAuthUid(user.uid);
+          setAuthIsAnonymous(false);
+          setAuthIsGoogleLinked(user.providerData.some((entry) => entry.providerId === 'google.com'));
+          setTrackedBillsRefreshKey((key) => key + 1);
+        },
+        countTrackedBills: async (uid) => (await getTrackedBills(uid)).length,
+        confirmSwitch: () => window.confirm(
+          'このGoogleアカウントには、すでに「お札の旅」のデータがあります。\n\n' +
+          'このブラウザには未同期の「登録したお札」があります。既存のGoogle同期データへ切り替えると、このブラウザの一覧は自動では統合されません。\n\n' +
+          '既存のGoogle同期データへ切り替えますか？'
+        ),
+      });
+
+      if (result.status === 'linked') {
+        console.info('[Google sync] Anonymous UID preserved:', result.previousUid === result.uid);
+        setAuthUid(result.uid);
+        setAuthIsAnonymous(false);
+        setAuthIsGoogleLinked(true);
+        setTrackedBillsRefreshKey((key) => key + 1);
+      } else if (result.status === 'switched') {
+        console.info('[Google sync] Switched to existing Google-linked Firebase user.');
+      } else if (result.status === 'popup-fallback') {
+        setGooglePopupFallbackAvailable(true);
+      }
+    } catch (error) {
+      const code = (error as { code?: string })?.code ?? 'unknown';
+      console.warn(`[Google sync] Firebase Auth failed: ${code}`, error);
+      const message = getGoogleSyncErrorMessage(error as { code?: string } | null);
+      if (message) setGoogleSyncError(message);
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
+
+  const handleGooglePopupFallback = async () => {
+    if (!googlePopupFallbackAvailable || !auth?.currentUser?.isAnonymous) return;
+
+    setGoogleSyncing(true);
+    setGoogleSyncError(null);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      const { user } = await signInWithPopup(auth, provider);
+      console.info('[Google sync] Switched using explicit popup fallback.');
+      setAuthUid(user.uid);
+      setAuthIsAnonymous(false);
+      setAuthIsGoogleLinked(user.providerData.some((entry) => entry.providerId === 'google.com'));
+      setTrackedBillsRefreshKey((key) => key + 1);
+      setGooglePopupFallbackAvailable(false);
+    } catch (error) {
+      const code = (error as { code?: string })?.code ?? 'unknown';
+      console.warn(`[Google sync] Explicit popup fallback failed: ${code}`, error);
+      const message = getGoogleSyncErrorMessage(error as { code?: string } | null);
+      if (message) setGoogleSyncError(message);
+    } finally {
+      setGoogleSyncing(false);
+    }
+  };
+
   return (
     <div className="app-container">
       {/* 祝祭モーダル */}
@@ -271,6 +358,12 @@ export function App() {
             loading={trackedBillsLoading}
             error={trackedBillsError}
             onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
+            syncState={authIsGoogleLinked ? 'linked' : authIsAnonymous ? 'anonymous' : 'other'}
+            syncing={googleSyncing}
+            syncError={googleSyncError}
+            onGoogleSync={handleGoogleSync}
+            popupFallbackAvailable={googlePopupFallbackAvailable}
+            onGooglePopupFallback={handleGooglePopupFallback}
           />
         )}
         {currentView === 'tracked' && !authReady && (

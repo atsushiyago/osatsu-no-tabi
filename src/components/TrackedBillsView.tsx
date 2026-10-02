@@ -7,17 +7,62 @@ interface TrackedBillsViewProps {
   loading: boolean;
   error: boolean;
   onSelectBill: (publicBillId: string) => void;
+  syncState: 'anonymous' | 'linked' | 'other' | 'unavailable';
+  syncing: boolean;
+  syncError: string | null;
+  onGoogleSync: () => void;
+  popupFallbackAvailable: boolean;
+  onGooglePopupFallback: () => void;
 }
 
-export function TrackedBillsView({ rows, loading, error, onSelectBill }: TrackedBillsViewProps) {
+export function TrackedBillsView({
+  rows,
+  loading,
+  error,
+  onSelectBill,
+  syncState,
+  syncing,
+  syncError,
+  onGoogleSync,
+  popupFallbackAvailable,
+  onGooglePopupFallback,
+}: TrackedBillsViewProps) {
   const newBillCount = getUnseenTrackedBills(rows).length;
 
   return (
     <section className="tracked-bills-view">
       <h1>登録したお札</h1>
       <p className="tracked-bills-note">
-        この端末・ブラウザから登録したお札の一覧です。ブラウザデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。
+        {syncState === 'linked'
+          ? 'Googleと同期した登録したお札の一覧です。同じGoogleアカウントで別の端末からも確認できます。'
+          : 'この端末・ブラウザから登録したお札の一覧です。ブラウザデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。'}
       </p>
+      {syncState === 'anonymous' && (
+        <section className="tracked-bills-sync" aria-labelledby="tracked-bills-sync-title">
+          <div>
+            <h2 id="tracked-bills-sync-title">別の端末でも登録したお札を見る</h2>
+            <p>Googleアカウントと同期すると、別のブラウザや端末でも同じ一覧を確認できます。</p>
+          </div>
+          <button type="button" onClick={onGoogleSync} disabled={syncing}>
+            {syncing ? 'Googleと同期しています…' : 'Googleで同期する'}
+          </button>
+          {popupFallbackAvailable && (
+            <div className="tracked-bills-sync-fallback">
+              <p>Googleアカウントを確認できませんでした。ボタンを押して、既存の同期データを開いてください。</p>
+              <button type="button" onClick={onGooglePopupFallback} disabled={syncing}>
+                Googleアカウントのデータを開く
+              </button>
+            </div>
+          )}
+          {syncError && <p className="tracked-bills-sync-error" role="alert">{syncError}</p>}
+        </section>
+      )}
+      {syncState === 'linked' && (
+        <section className="tracked-bills-sync tracked-bills-sync-linked" aria-live="polite">
+          <h2>Googleと同期しています</h2>
+          <p>別の端末でも同じGoogleアカウントで利用できます。</p>
+        </section>
+      )}
       {!loading && !error && newBillCount > 0 && (
         <p className="tracked-bills-new-summary" role="status">
           {newBillCount}枚のお札に新しい発見があります

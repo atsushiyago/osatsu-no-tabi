@@ -211,6 +211,48 @@ body {
   font-size: 13px;
   line-height: 1.65;
 }
+.tracked-bills-sync {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #e5e0d5;
+  border-radius: 8px;
+  background: #fbfaf6;
+}
+.tracked-bills-sync h2 {
+  color: #3c453d;
+  font-size: 14px;
+  font-weight: 700;
+}
+.tracked-bills-sync p {
+  margin: 2px 0 0;
+  color: #62645e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tracked-bills-sync button {
+  padding: 7px 10px;
+  border: 1px solid #c8d0c8;
+  border-radius: 6px;
+  background: #fff;
+  color: #365d4a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tracked-bills-sync button:disabled { opacity: 0.65; cursor: wait; }
+.tracked-bills-sync-fallback { grid-column: 1 / -1; display: grid; justify-items: start; gap: 8px; }
+.tracked-bills-sync .tracked-bills-sync-error { grid-column: 1 / -1; color: #9f3b2f; }
+.tracked-bills-sync-linked { display: block; }
+@media (max-width: 380px) {
+  .tracked-bills-sync { grid-template-columns: 1fr; }
+  .tracked-bills-sync button { justify-self: start; }
+}
 .tracked-bills-empty {
   padding: 36px 20px;
   border: 1px solid #dedbd1;
