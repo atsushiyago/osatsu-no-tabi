@@ -35,7 +35,7 @@ export function TrackedBillsView({
       <p className="tracked-bills-note">
         {syncState === 'linked'
           ? 'Googleと同期した登録したお札の一覧です。同じGoogleアカウントで別の端末からも確認できます。'
-          : 'この端末・ブラウザから登録したお札の一覧です。ブラウザデータを削除したり端末を変更すると、現在の状態では一覧を引き継げません。'}
+          : 'この端末・ブラウザから登録したお札の一覧です。'}
       </p>
       {syncState === 'anonymous' && (
         <section className="tracked-bills-sync" aria-labelledby="tracked-bills-sync-title">
