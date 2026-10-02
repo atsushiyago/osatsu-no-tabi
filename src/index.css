@@ -176,7 +176,7 @@ body {
 .bottom-nav .nav-item { flex: 1; min-width: 0; padding-inline: 3px; }
 .bottom-nav .nav-item span { text-align: center; line-height: 1.2; }
 
-.home-social-links {
+.app-social-links {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -186,13 +186,18 @@ body {
   color: #8a887f;
   font-size: 12px;
 }
-.home-social-links a {
+.app-social-links a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
   color: inherit;
   text-decoration: none;
   transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
-.home-social-links a:hover,
-.home-social-links a:focus-visible {
+.app-social-links a:hover,
+.app-social-links a:focus-visible {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 3px;

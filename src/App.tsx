@@ -378,6 +378,21 @@ export function App() {
             <p>現在この機能を利用できません。公開中のお札の検索や閲覧は引き続き利用できます。</p>
           </div>
         )}
+
+        <footer className="app-social-links" aria-label="外部リンク">
+          <a
+            href="https://x.com/bicycle_geek"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="X @bicycle_geek"
+          >
+            𝕏
+          </a>
+          <span aria-hidden="true">｜</span>
+          <a href="https://github.com/atsushiyago/osatsu-no-tabi" target="_blank" rel="noopener noreferrer">
+            GitHub
+          </a>
+        </footer>
       </main>
 
       {/* ボトムナビゲーションバー（スマホ用） */}
