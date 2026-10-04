@@ -287,6 +287,7 @@ export const BillDetailView = ({
       {/* 地図コンポーネント */}
       <section style={{ marginBottom: '24px' }}>
         <div
+          className="journey-map-heading"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -295,6 +296,7 @@ export const BillDetailView = ({
           }}
         >
           <h3
+            className="journey-map-title"
             style={{
               fontSize: '18px',
               fontWeight: 800,

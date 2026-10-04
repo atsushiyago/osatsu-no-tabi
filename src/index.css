@@ -970,3 +970,12 @@ body, .app-container { background: var(--bg-main); }
   .stats-container { padding: 14px 12px; }
   .stats-grid { gap: 8px; }
 }
+@media (max-width: 600px) {
+  .journey-map-heading {
+    flex-direction: column;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 2px;
+  }
+  .journey-map-title { white-space: nowrap; }
+}
