@@ -96,7 +96,7 @@ export function TrackedBillsView({
                   </span>
                 )}
                 <span>{bill.denomination.toLocaleString()}円札</span>
-                <span>最終発見地域: {latestSighting ? `${latestSighting.prefecture} ${latestSighting.municipality}` : '記録なし'}</span>
+                <span>最終発見地: {latestSighting ? `${latestSighting.prefecture} ${latestSighting.municipality}` : '記録なし'}</span>
                 {row.lastSeenMunicipality && currentMunicipality && row.lastSeenMunicipality !== currentMunicipality && (
                   <span
                     className="travel-route tracked-bill-region-change"

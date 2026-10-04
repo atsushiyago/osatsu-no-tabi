@@ -1,8 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
 import {
-  collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs, getFirestore,
-  orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where,
+  collection, connectFirestoreEmulator, deleteDoc, doc, documentId, getDoc, getDocs, getFirestore,
+  limit, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where,
+  startAfter,
 } from 'firebase/firestore';
 
 const projectId = 'demo-osatsu-public-serial';
@@ -206,7 +207,21 @@ async function main() {
   await check('serialIndexとpublicBillの対応不整合拒否', async () => writeOperation(serial(), { index: { publicBillId: opaque() } }), true);
   await check('publicBills get/list許可', async () => {
     if (!(await getDoc(doc(db, 'publicBills', initial.publicBillId))).exists()) throw new Error('get failed');
-    await getDocs(query(collection(db, 'publicBills'), orderBy('updatedAt')));
+    const publicBills = collection(db, 'publicBills');
+    const firstPage = await getDocs(query(
+      publicBills,
+      orderBy('updatedAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(1),
+    ));
+    if (firstPage.empty) throw new Error('first page was empty');
+    await getDocs(query(
+      publicBills,
+      orderBy('updatedAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      startAfter(firstPage.docs[0]),
+      limit(21),
+    ));
   });
   await check('publicBillIdでのsighting query許可', async () => {
     const sightings = await getDocs(query(collection(db, 'sightings'), where('publicBillId', '==', initial.publicBillId)));

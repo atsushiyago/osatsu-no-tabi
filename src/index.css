@@ -175,6 +175,21 @@ body {
 
 .bottom-nav .nav-item { flex: 1; min-width: 0; padding-inline: 3px; }
 .bottom-nav .nav-item span { text-align: center; line-height: 1.2; }
+.home-all-bills-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.home-all-bills-link:hover { color: var(--primary); text-decoration: underline; }
 
 .app-social-links {
   display: flex;
@@ -204,7 +219,8 @@ body {
 }
 
 .tracked-bills-view, .tracked-bills-unavailable { padding-bottom: 20px; }
-.tracked-bills-view h1, .tracked-bills-unavailable h1 {
+.public-bills-view { padding-bottom: 20px; }
+.tracked-bills-view h1, .tracked-bills-unavailable h1, .public-bills-view h1 {
   margin: 0 0 8px;
   color: #25392f;
   font-size: 22px;
@@ -270,6 +286,7 @@ body {
 .tracked-bills-empty h2 { margin: 12px 0 6px; color: #303a32; font-size: 17px; }
 .tracked-bills-empty p { margin: 0; font-size: 14px; line-height: 1.5; }
 .tracked-bills-list { display: grid; gap: 10px; }
+.public-bills-more, .public-bills-retry { margin-top: 16px; }
 .tracked-bill-card {
   display: flex;
   align-items: center;

@@ -11,11 +11,12 @@ import type { RegisterResult } from './types';
 import { auth, isFirebaseConfigured } from './services/firebase';
 import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
+import { PublicBillsView } from './components/PublicBillsView';
 import { ensureAnonymousUser, observeAuthState } from './services/firebase';
 import { getTrackedBills, type TrackedBillRow } from './services/trackedBills';
 import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
 
-type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked';
+type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked' | 'bills';
 type TrackedBillsLoadResult = {
   uid: string;
   refreshKey: number;
@@ -121,6 +122,8 @@ export function App() {
         setCurrentView('search');
       } else if (hash === '#/my-bills') {
         setCurrentView('tracked');
+      } else if (hash === '#/bills') {
+        setCurrentView('bills');
       } else {
         setCurrentView('home');
       }
@@ -161,6 +164,9 @@ export function App() {
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
+    } else if (view === 'bills') {
+      setCurrentView('bills');
+      window.location.hash = '#/bills';
     } else {
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('home');
@@ -323,6 +329,7 @@ export function App() {
             onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
             trackedBills={authUid ? trackedBills : null}
             onNavigateTrackedBills={() => navigateTo('tracked')}
+            onNavigateBills={() => navigateTo('bills')}
           />
         )}
 
@@ -377,6 +384,9 @@ export function App() {
             <h1>登録したお札</h1>
             <p>現在この機能を利用できません。公開中のお札の検索や閲覧は引き続き利用できます。</p>
           </div>
+        )}
+        {currentView === 'bills' && (
+          <PublicBillsView onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)} />
         )}
 
         <footer className="app-social-links" aria-label="外部リンク">

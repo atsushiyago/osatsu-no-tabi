@@ -7,6 +7,8 @@ import {
   query,
   where,
   orderBy,
+  documentId,
+  startAfter,
   limit,
   runTransaction,
   getAggregateFromServer,
@@ -14,6 +16,9 @@ import {
   Timestamp,
   count,
   sum,
+  type DocumentData,
+  type QueryConstraint,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { auth, db, ensureAnonymousUser, isFirebaseConfigured } from './firebase';
 import type {
@@ -28,6 +33,16 @@ import { calculateDistanceKm, getMunicipalityLocation } from '../utils/geo';
 import { normalizeSerialNumber } from '../utils/serial';
 import { startTiming } from '../utils/timing';
 import { isDebugTiming } from '../utils/debug';
+import { getPageWindow, projectPublicBill } from '../utils/publicBillPagination.js';
+
+export const PUBLIC_BILLS_PAGE_SIZE = 20;
+export type PublicBillsCursor = QueryDocumentSnapshot<DocumentData>;
+
+export interface PublicBillsPage {
+  bills: Bill[];
+  nextCursor: PublicBillsCursor | null;
+  hasMore: boolean;
+}
 
 /**
  * Firestore書き込み用データから undefined のフィールドを除外するヘルパー
@@ -700,6 +715,44 @@ export async function getGlobalStats(): Promise<GlobalStats> {
     maxDistanceKm,
     longestJourneyDays,
   };
+}
+
+/** Fetch one page of public bill summaries, ordered like the Home recent list. */
+export async function getPublicBillsPage(
+  cursor: PublicBillsCursor | null = null
+): Promise<PublicBillsPage> {
+  if (isFirebaseConfigured && db) {
+    const endTotal = startTiming('getPublicBillsPage');
+    try {
+      const billsRef = collection(db, 'publicBills');
+      const constraints: QueryConstraint[] = [
+        orderBy('updatedAt', 'desc'),
+        // Stable tie-breaker for bills whose updatedAt values are identical.
+        orderBy(documentId(), 'desc'),
+      ];
+      if (cursor) constraints.push(startAfter(cursor));
+      constraints.push(limit(PUBLIC_BILLS_PAGE_SIZE + 1));
+
+      const snap = await getDocs(query(billsRef, ...constraints));
+      const page = getPageWindow(snap.docs, PUBLIC_BILLS_PAGE_SIZE);
+      endTotal();
+      return {
+        bills: page.items.map((docSnap) => projectPublicBill(docSnap.id, docSnap.data())),
+        nextCursor: page.hasMore ? page.cursor : null,
+        hasMore: page.hasMore,
+      };
+    } catch (error) {
+      endTotal(error);
+      throw error;
+    }
+  }
+
+  if (import.meta.env.PROD) {
+    throw new Error('本番環境のFirebase環境変数が設定されていません。Cloudflareの環境変数 (VITE_FIREBASE_*) を確認してください。');
+  }
+
+  // Firebaseを使わないローカルデモでは公開データを取得しない。
+  return { bills: [], nextCursor: null, hasMore: false };
 }
 
 /**

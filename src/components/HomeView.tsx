@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   Compass,
   PlusCircle,
-  MapPin,
   TrendingUp,
   Award,
   ArrowRight,
@@ -14,6 +13,7 @@ import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
 import type { TrackedBillRow } from '../services/trackedBills';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 import { getLatestPublicSightingRoute } from '../utils/journeyRoute';
+import { JourneyBillCard } from './JourneyBillCard';
 
 interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
@@ -21,6 +21,7 @@ interface HomeViewProps {
   onSelectBill: (publicBillId: string) => void;
   trackedBills: TrackedBillRow[] | null;
   onNavigateTrackedBills: () => void;
+  onNavigateBills: () => void;
 }
 
 export const HomeView = ({
@@ -28,6 +29,7 @@ export const HomeView = ({
   onSelectBill,
   trackedBills,
   onNavigateTrackedBills,
+  onNavigateBills,
 }: HomeViewProps) => {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
@@ -138,7 +140,6 @@ export const HomeView = ({
             <TrendingUp size={16} color="#9f3b2f" />
             <span>全国の旅の統計</span>
           </div>
-          <span style={{ fontSize: '15px', color: '#494b46' }}>リアルタイム</span>
         </div>
 
         <div className="stats-grid">
@@ -200,9 +201,9 @@ export const HomeView = ({
               <Award size={18} color="#f59e0b" />
               <span>最近の旅</span>
             </h2>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>
-              タップで軌跡を表示
-            </span>
+            <button className="home-all-bills-link" type="button" onClick={onNavigateBills}>
+              すべて見る <ArrowRight size={16} aria-hidden="true" />
+            </button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -215,92 +216,14 @@ export const HomeView = ({
                 b.sightings[b.sightings.length - 1]?.municipality || startCity;
 
               return (
-                <div
+                <JourneyBillCard
                   key={b.id}
-                  className="journey-row"
-                  onClick={isSample ? undefined : () => onSelectBill(b.id)}
-                  onKeyDown={isSample ? undefined : (event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onSelectBill(b.id);
-                    }
-                  }}
-                  role={isSample ? undefined : 'button'}
-                  tabIndex={isSample ? undefined : 0}
-                  style={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '14px',
-                    padding: '14px 16px',
-                    cursor: isSample ? 'default' : 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '4px',
-                      }}
-                    >
-                      {isSample && <span className="sample-badge">サンプル</span>}
-                      {!isSample && <span
-                        style={{
-                          backgroundColor: '#eee5d5',
-                          color: '#463924',
-                          fontSize: '15px',
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        {b.denomination.toLocaleString()}円札
-                      </span>}
-                      <span
-                        style={{
-                          fontFamily: 'monospace',
-                          fontWeight: 700,
-                          fontSize: isSample ? '15px' : '13px',
-                          color: '#334155',
-                        }}
-                      >
-                        {isSample ? 'サンプル旅 ' + b.id.slice(-3) : `旅するお札 #${b.id.slice(0, 4).toUpperCase()}`}
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontSize: '12px',
-                        color: '#475569',
-                      }}
-                    >
-                        <MapPin size={15} color="#494b46" />
-                      <span>{startCity}</span>
-                      {b.sightings.length > 1 && (
-                        <>
-                      <span style={{ color: '#9f3b2f' }}>→</span>
-                      <span style={{ fontWeight: 700, color: '#7f2f27' }}>
-                            {latestCity}
-                          </span>
-                        </>
-                      )}
-                      <span style={{ color: '#494b46', fontSize: '15px' }}>
-                        ({b.sightingsCount}回目・約{b.totalDistanceKm}km)
-                      </span>
-                    </div>
-                  </div>
-
-                  {!isSample && <ArrowRight size={18} color="#94a3b8" />}
-                </div>
+                  bill={b}
+                  isSample={isSample}
+                  startCity={startCity}
+                  latestCity={b.sightings.length > 1 ? latestCity : startCity}
+                  onSelectBill={onSelectBill}
+                />
               );
             })}
           </div>
