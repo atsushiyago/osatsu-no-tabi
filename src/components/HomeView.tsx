@@ -22,6 +22,8 @@ interface HomeViewProps {
   trackedBills: TrackedBillRow[] | null;
   onNavigateTrackedBills: () => void;
   onNavigateBills: () => void;
+  restoreTargetBillId: string | null;
+  onRestoreComplete: () => void;
 }
 
 export const HomeView = ({
@@ -30,6 +32,8 @@ export const HomeView = ({
   trackedBills,
   onNavigateTrackedBills,
   onNavigateBills,
+  restoreTargetBillId,
+  onRestoreComplete,
 }: HomeViewProps) => {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
@@ -61,6 +65,14 @@ export const HomeView = ({
     }
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (loading || !restoreTargetBillId) return;
+    const target = Array.from(document.querySelectorAll<HTMLElement>('[data-public-bill-id]'))
+      .find((element) => element.dataset.publicBillId === restoreTargetBillId);
+    target?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    onRestoreComplete();
+  }, [loading, onRestoreComplete, recentJourneys, restoreTargetBillId]);
 
   return (
     <div>

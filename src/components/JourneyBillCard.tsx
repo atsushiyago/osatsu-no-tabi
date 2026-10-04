@@ -22,6 +22,7 @@ export function JourneyBillCard({
   return (
     <div
       className="journey-row"
+      data-public-bill-id={clickable ? bill.id : undefined}
       onClick={clickable ? () => onSelectBill?.(bill.id) : undefined}
       onKeyDown={clickable ? (event) => {
         if (event.key === 'Enter' || event.key === ' ') {

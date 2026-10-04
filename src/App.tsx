@@ -23,6 +23,11 @@ type TrackedBillsLoadResult = {
   rows: TrackedBillRow[] | null;
   error: boolean;
 };
+type BillReturnContext = {
+  hash: string;
+  publicBillId: string;
+  visibleCount: number | null;
+};
 
 export function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('home');
@@ -41,9 +46,9 @@ export function App() {
   const [registrationTrackedBillsAvailable, setRegistrationTrackedBillsAvailable] = useState(false);
   const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
   const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
+  const [billReturnForRestore, setBillReturnForRestore] = useState<BillReturnContext | null>(null);
   const [routeRevision, setRouteRevision] = useState(0);
-  const billReturnRef = useRef<{ hash: string; scrollY: number } | null>(null);
-  const pendingScrollRestoreRef = useRef<number | null>(null);
+  const billReturnRef = useRef<BillReturnContext | null>(null);
   const lastHandledLocationRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -56,12 +61,9 @@ export function App() {
   }, []);
 
   useLayoutEffect(() => {
-    const restoreScrollY = pendingScrollRestoreRef.current;
-    if (restoreScrollY !== null && currentView === 'bills') return;
-    pendingScrollRestoreRef.current = null;
     const frame = window.requestAnimationFrame(() => {
       window.scrollTo({
-        top: restoreScrollY ?? 0,
+        top: 0,
         left: window.scrollX,
         behavior: 'auto',
       });
@@ -111,13 +113,8 @@ export function App() {
   const trackedBillsLoading = hasTrackedBillsView && Boolean(authUid) && !currentTrackedBillsResult;
   const trackedBillsError = currentTrackedBillsResult?.error ?? false;
 
-  const restorePublicBillsScroll = useCallback(() => {
-    const scrollY = pendingScrollRestoreRef.current;
-    if (scrollY === null) return;
-    pendingScrollRestoreRef.current = null;
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollY, left: window.scrollX, behavior: 'auto' });
-    });
+  const clearBillReturnForRestore = useCallback(() => {
+    setBillReturnForRestore(null);
   }, []);
 
   // Public detail routes contain only opaque IDs.
@@ -162,7 +159,12 @@ export function App() {
     };
   }, []);
 
-  const navigateTo = (view: ViewMode, identifier?: string, keepRegistrationNotice = false) => {
+  const navigateTo = (
+    view: ViewMode,
+    identifier?: string,
+    keepRegistrationNotice = false,
+    visibleCount: number | null = null
+  ) => {
     setRouteRevision((revision) => revision + 1);
     if (!keepRegistrationNotice) {
       setRegistrationCompletedBillId(null);
@@ -171,13 +173,15 @@ export function App() {
     if (view === 'bill' && identifier) {
       billReturnRef.current = {
         hash: window.location.hash || '#/',
-        scrollY: window.scrollY,
+        publicBillId: identifier,
+        visibleCount,
       };
       setSelectedPublicBillId(identifier);
       setCurrentView('bill');
       window.location.hash = `#/bill/${identifier}`;
     } else if (view === 'register') {
       billReturnRef.current = null;
+      setBillReturnForRestore(null);
       if (identifier) {
         setRegisterInitialSerial(identifier);
       } else {
@@ -187,19 +191,23 @@ export function App() {
       window.location.hash = '#/register';
     } else if (view === 'search') {
       billReturnRef.current = null;
+      setBillReturnForRestore(null);
       setCurrentView('search');
       window.location.hash = '#/search';
     } else if (view === 'tracked') {
       billReturnRef.current = null;
+      setBillReturnForRestore(null);
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
     } else if (view === 'bills') {
       billReturnRef.current = null;
+      setBillReturnForRestore(null);
       setCurrentView('bills');
       window.location.hash = '#/bills';
     } else {
       billReturnRef.current = null;
+      setBillReturnForRestore(null);
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('home');
       window.location.hash = '#/';
@@ -362,6 +370,8 @@ export function App() {
             trackedBills={authUid ? trackedBills : null}
             onNavigateTrackedBills={() => navigateTo('tracked')}
             onNavigateBills={() => navigateTo('bills')}
+            restoreTargetBillId={billReturnForRestore?.hash === '#/' ? billReturnForRestore.publicBillId : null}
+            onRestoreComplete={clearBillReturnForRestore}
           />
         )}
 
@@ -391,9 +401,7 @@ export function App() {
               const previousRoute = billReturnRef.current;
               billReturnRef.current = null;
               if (previousRoute) {
-                if (previousRoute.hash === '#/bills') {
-                  pendingScrollRestoreRef.current = previousRoute.scrollY;
-                }
+                setBillReturnForRestore(previousRoute);
                 window.history.back();
               } else {
                 navigateTo('home');
@@ -430,8 +438,10 @@ export function App() {
         )}
         {currentView === 'bills' && (
           <PublicBillsView
-            onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
-            onInitialLoadComplete={restorePublicBillsScroll}
+            onSelectBill={(publicBillId, visibleCount) => navigateTo('bill', publicBillId, false, visibleCount)}
+            restoreTargetBillId={billReturnForRestore?.hash === '#/bills' ? billReturnForRestore.publicBillId : null}
+            restoreVisibleCount={billReturnForRestore?.hash === '#/bills' ? billReturnForRestore.visibleCount : null}
+            onRestoreComplete={clearBillReturnForRestore}
           />
         )}
 

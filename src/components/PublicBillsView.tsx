@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { JourneyBillCard } from './JourneyBillCard';
 import {
   getPublicBillsPage,
@@ -7,11 +7,18 @@ import {
 import type { Bill } from '../types';
 
 interface PublicBillsViewProps {
-  onSelectBill: (publicBillId: string) => void;
-  onInitialLoadComplete: () => void;
+  onSelectBill: (publicBillId: string, visibleCount: number) => void;
+  restoreTargetBillId: string | null;
+  restoreVisibleCount: number | null;
+  onRestoreComplete: () => void;
 }
 
-export function PublicBillsView({ onSelectBill, onInitialLoadComplete }: PublicBillsViewProps) {
+export function PublicBillsView({
+  onSelectBill,
+  restoreTargetBillId,
+  restoreVisibleCount,
+  onRestoreComplete,
+}: PublicBillsViewProps) {
   const [bills, setBills] = useState<Bill[]>([]);
   const [cursor, setCursor] = useState<PublicBillsCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -19,28 +26,67 @@ export function PublicBillsView({ onSelectBill, onInitialLoadComplete }: PublicB
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const initialRestoreRef = useRef({
+    billId: restoreTargetBillId,
+    visibleCount: restoreVisibleCount,
+  });
 
   useEffect(() => {
     let active = true;
-    getPublicBillsPage()
-      .then((page) => {
-        if (!active) return;
-        setBills(page.bills);
-        setCursor(page.nextCursor);
-        setHasMore(page.hasMore);
-      })
-      .catch((reason) => {
-        console.error('Could not load public bills:', reason);
-        if (active) setError(true);
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-          onInitialLoadComplete();
+    const { billId: targetBillId, visibleCount: targetVisibleCount } = initialRestoreRef.current;
+    const loadInitialPage = async () => {
+      const loadedBills: Bill[] = [];
+      let nextCursor: PublicBillsCursor | null = null;
+      let hasMorePages = false;
+      try {
+        let page = await getPublicBillsPage();
+        loadedBills.push(...page.bills);
+        nextCursor = page.nextCursor;
+        hasMorePages = page.hasMore;
+
+        while (
+          active &&
+          nextCursor &&
+          targetBillId &&
+          targetVisibleCount !== null &&
+          (loadedBills.length < targetVisibleCount ||
+            !loadedBills.some((bill) => bill.id === targetBillId))
+        ) {
+          page = await getPublicBillsPage(nextCursor);
+          loadedBills.push(...page.bills);
+          nextCursor = page.nextCursor;
+          hasMorePages = page.hasMore;
         }
-      });
+
+        if (active) {
+          setBills(loadedBills);
+          setCursor(nextCursor);
+          setHasMore(hasMorePages);
+        }
+      } catch (reason) {
+        console.error('Could not load public bills:', reason);
+        if (active) {
+          setBills(loadedBills);
+          setCursor(nextCursor);
+          setHasMore(hasMorePages);
+          setError(true);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void loadInitialPage();
     return () => { active = false; };
-  }, [onInitialLoadComplete, retryKey]);
+  }, [retryKey]);
+
+  useEffect(() => {
+    if (loading || !restoreTargetBillId) return;
+    const target = Array.from(document.querySelectorAll<HTMLElement>('[data-public-bill-id]'))
+      .find((element) => element.dataset.publicBillId === restoreTargetBillId);
+    target?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    onRestoreComplete();
+  }, [bills, loading, onRestoreComplete, restoreTargetBillId]);
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return;
@@ -93,7 +139,7 @@ export function PublicBillsView({ onSelectBill, onInitialLoadComplete }: PublicB
               key={bill.id}
               bill={bill}
               latestCity={bill.lastMunicipality}
-              onSelectBill={onSelectBill}
+              onSelectBill={(publicBillId) => onSelectBill(publicBillId, bills.length)}
             />
           ))}
         </div>
