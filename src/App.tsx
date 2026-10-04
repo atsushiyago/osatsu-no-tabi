@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Compass, PlusCircle, Search, WalletCards } from 'lucide-react';
 import type { FirebaseError } from 'firebase/app';
 import { GoogleAuthProvider, linkWithPopup, signInWithCredential, signInWithPopup } from 'firebase/auth';
@@ -42,6 +42,9 @@ export function App() {
   const [trackedBillsRefreshKey, setTrackedBillsRefreshKey] = useState(0);
   const [trackedBillsResult, setTrackedBillsResult] = useState<TrackedBillsLoadResult | null>(null);
   const [routeRevision, setRouteRevision] = useState(0);
+  const billReturnRef = useRef<{ hash: string; scrollY: number } | null>(null);
+  const pendingScrollRestoreRef = useRef<number | null>(null);
+  const lastHandledLocationRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!('scrollRestoration' in window.history)) return;
@@ -53,11 +56,18 @@ export function App() {
   }, []);
 
   useLayoutEffect(() => {
+    const restoreScrollY = pendingScrollRestoreRef.current;
+    if (restoreScrollY !== null && currentView === 'bills') return;
+    pendingScrollRestoreRef.current = null;
     const frame = window.requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: window.scrollX, behavior: 'auto' });
+      window.scrollTo({
+        top: restoreScrollY ?? 0,
+        left: window.scrollX,
+        behavior: 'auto',
+      });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [routeRevision]);
+  }, [currentView, routeRevision]);
 
   useEffect(() => {
     const unsubscribe = observeAuthState((user) => {
@@ -101,9 +111,22 @@ export function App() {
   const trackedBillsLoading = hasTrackedBillsView && Boolean(authUid) && !currentTrackedBillsResult;
   const trackedBillsError = currentTrackedBillsResult?.error ?? false;
 
-      // Public detail routes contain only opaque IDs.
+  const restorePublicBillsScroll = useCallback(() => {
+    const scrollY = pendingScrollRestoreRef.current;
+    if (scrollY === null) return;
+    pendingScrollRestoreRef.current = null;
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, left: window.scrollX, behavior: 'auto' });
+    });
+  }, []);
+
+  // Public detail routes contain only opaque IDs.
   useEffect(() => {
     const handleUrlChange = () => {
+      const currentLocation = window.location.href;
+      if (lastHandledLocationRef.current === currentLocation) return;
+      lastHandledLocationRef.current = currentLocation;
+
       setRouteRevision((revision) => revision + 1);
       const hash = window.location.hash;
       const pathname = window.location.pathname;
@@ -146,10 +169,15 @@ export function App() {
       setRegistrationTrackedBillsAvailable(false);
     }
     if (view === 'bill' && identifier) {
+      billReturnRef.current = {
+        hash: window.location.hash || '#/',
+        scrollY: window.scrollY,
+      };
       setSelectedPublicBillId(identifier);
       setCurrentView('bill');
       window.location.hash = `#/bill/${identifier}`;
     } else if (view === 'register') {
+      billReturnRef.current = null;
       if (identifier) {
         setRegisterInitialSerial(identifier);
       } else {
@@ -158,16 +186,20 @@ export function App() {
       setCurrentView('register');
       window.location.hash = '#/register';
     } else if (view === 'search') {
+      billReturnRef.current = null;
       setCurrentView('search');
       window.location.hash = '#/search';
     } else if (view === 'tracked') {
+      billReturnRef.current = null;
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('tracked');
       window.location.hash = '#/my-bills';
     } else if (view === 'bills') {
+      billReturnRef.current = null;
       setCurrentView('bills');
       window.location.hash = '#/bills';
     } else {
+      billReturnRef.current = null;
       setTrackedBillsRefreshKey((key) => key + 1);
       setCurrentView('home');
       window.location.hash = '#/';
@@ -355,7 +387,18 @@ export function App() {
             registrationCompleted={registrationCompletedBillId === selectedPublicBillId}
             showTrackedBillsLink={registrationTrackedBillsAvailable}
             onNavigateTrackedBills={() => navigateTo('tracked')}
-            onBack={() => navigateTo('home')}
+            onBack={() => {
+              const previousRoute = billReturnRef.current;
+              billReturnRef.current = null;
+              if (previousRoute) {
+                if (previousRoute.hash === '#/bills') {
+                  pendingScrollRestoreRef.current = previousRoute.scrollY;
+                }
+                window.history.back();
+              } else {
+                navigateTo('home');
+              }
+            }}
           />
         )}
 
@@ -386,7 +429,10 @@ export function App() {
           </div>
         )}
         {currentView === 'bills' && (
-          <PublicBillsView onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)} />
+          <PublicBillsView
+            onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
+            onInitialLoadComplete={restorePublicBillsScroll}
+          />
         )}
 
         <footer className="app-social-links" aria-label="外部リンク">

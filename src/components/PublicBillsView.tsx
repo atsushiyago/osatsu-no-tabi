@@ -8,9 +8,10 @@ import type { Bill } from '../types';
 
 interface PublicBillsViewProps {
   onSelectBill: (publicBillId: string) => void;
+  onInitialLoadComplete: () => void;
 }
 
-export function PublicBillsView({ onSelectBill }: PublicBillsViewProps) {
+export function PublicBillsView({ onSelectBill, onInitialLoadComplete }: PublicBillsViewProps) {
   const [bills, setBills] = useState<Bill[]>([]);
   const [cursor, setCursor] = useState<PublicBillsCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -33,10 +34,13 @@ export function PublicBillsView({ onSelectBill }: PublicBillsViewProps) {
         if (active) setError(true);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          onInitialLoadComplete();
+        }
       });
     return () => { active = false; };
-  }, [retryKey]);
+  }, [onInitialLoadComplete, retryKey]);
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return;
