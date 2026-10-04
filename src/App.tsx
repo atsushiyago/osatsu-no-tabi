@@ -13,7 +13,7 @@ import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
 import { PublicBillsView } from './components/PublicBillsView';
 import { ensureAnonymousUser, observeAuthState } from './services/firebase';
-import { getTrackedBills, type TrackedBillRow } from './services/trackedBills';
+import { getTrackedBills, getTrackedBillsCount, type TrackedBillRow } from './services/trackedBills';
 import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked' | 'bills';
@@ -92,7 +92,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (currentView !== 'home' && currentView !== 'tracked') return;
+    if (currentView !== 'home') return;
     if (!authUid) return;
     let active = true;
     getTrackedBills(authUid)
@@ -106,12 +106,9 @@ export function App() {
     return () => { active = false; };
   }, [authUid, currentView, trackedBillsRefreshKey]);
 
-  const hasTrackedBillsView = currentView === 'home' || currentView === 'tracked';
   const currentTrackedBillsResult = trackedBillsResult?.uid === authUid &&
     trackedBillsResult.refreshKey === trackedBillsRefreshKey ? trackedBillsResult : null;
   const trackedBills = currentTrackedBillsResult?.rows ?? null;
-  const trackedBillsLoading = hasTrackedBillsView && Boolean(authUid) && !currentTrackedBillsResult;
-  const trackedBillsError = currentTrackedBillsResult?.error ?? false;
 
   const clearBillReturnForRestore = useCallback(() => {
     setBillReturnForRestore(null);
@@ -250,7 +247,7 @@ export function App() {
           setAuthIsGoogleLinked(user.providerData.some((entry) => entry.providerId === 'google.com'));
           setTrackedBillsRefreshKey((key) => key + 1);
         },
-        countTrackedBills: async (uid) => (await getTrackedBills(uid)).length,
+        countTrackedBills: getTrackedBillsCount,
         confirmSwitch: () => window.confirm(
           'このGoogleアカウントには、すでに「お札の旅」のデータがあります。\n\n' +
           'このブラウザには未同期の「登録したお札」があります。既存のGoogle同期データへ切り替えると、このブラウザの一覧は自動では統合されません。\n\n' +
@@ -412,10 +409,12 @@ export function App() {
 
         {currentView === 'tracked' && authUid && (
           <TrackedBillsView
-            rows={trackedBills ?? []}
-            loading={trackedBillsLoading}
-            error={trackedBillsError}
-            onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
+            key={authUid}
+            uid={authUid}
+            restoreTargetBillId={billReturnForRestore?.hash === '#/my-bills' ? billReturnForRestore.publicBillId : null}
+            restoreVisibleCount={billReturnForRestore?.hash === '#/my-bills' ? billReturnForRestore.visibleCount : null}
+            onSelectBill={(publicBillId, visibleCount) => navigateTo('bill', publicBillId, false, visibleCount)}
+            onRestoreComplete={clearBillReturnForRestore}
             syncState={authIsGoogleLinked ? 'linked' : authIsAnonymous ? 'anonymous' : 'other'}
             syncing={googleSyncing}
             syncError={googleSyncError}

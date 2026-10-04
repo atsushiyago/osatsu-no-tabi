@@ -236,6 +236,17 @@ async function main() {
   await check('公開userNoteへ完全記番号を含める書き込み拒否', async () => writeOperation(serial(), { sighting: { userNote: '番号はAA123456Bでした' } }), true);
   await check('sighting precise coordinate fields write拒否', async () => writeOperation(serial(), { sighting: { latitudeApprox: 35.6, longitudeApprox: 139.7 } }), true);
   await check('owner trackedBills read許可', async () => getDocs(collection(db, 'users', user.uid, 'trackedBills')));
+  await check('owner trackedBills firstRegisteredByMe / createdAt cursor query許可', async () => {
+    const tracked = await getDocs(query(
+      collection(db, 'users', user.uid, 'trackedBills'),
+      where('firstRegisteredByMe', '==', true),
+      orderBy('createdAt', 'desc'),
+      limit(21),
+    ));
+    if (tracked.empty || tracked.docs.some((trackedDoc) => trackedDoc.data().firstRegisteredByMe !== true)) {
+      throw new Error('trackedBills page query returned no first registrations or included a rediscovery record');
+    }
+  });
   await check('other UID trackedBills read拒否', async () => getDocs(collection(db2, 'users', user.uid, 'trackedBills')), true);
   await check('other UID trackedBills write拒否', async () => updateDoc(doc(db2, 'users', user.uid, 'trackedBills', initial.publicBillId), { notifyOnRediscovery: true }), true);
   await check('rateLimits delete拒否', async () => deleteDoc(doc(db, 'rateLimits', user.uid)), true);

@@ -1,12 +1,18 @@
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, WalletCards } from 'lucide-react';
-import type { TrackedBillRow } from '../services/trackedBills';
+import {
+  getTrackedBillsPage,
+  type TrackedBillRow,
+  type TrackedBillsCursor,
+} from '../services/trackedBills';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 
 interface TrackedBillsViewProps {
-  rows: TrackedBillRow[];
-  loading: boolean;
-  error: boolean;
-  onSelectBill: (publicBillId: string) => void;
+  uid: string;
+  restoreTargetBillId: string | null;
+  restoreVisibleCount: number | null;
+  onSelectBill: (publicBillId: string, visibleCount: number) => void;
+  onRestoreComplete: () => void;
   syncState: 'anonymous' | 'linked' | 'other' | 'unavailable';
   syncing: boolean;
   syncError: string | null;
@@ -16,10 +22,11 @@ interface TrackedBillsViewProps {
 }
 
 export function TrackedBillsView({
-  rows,
-  loading,
-  error,
+  uid,
+  restoreTargetBillId,
+  restoreVisibleCount,
   onSelectBill,
+  onRestoreComplete,
   syncState,
   syncing,
   syncError,
@@ -27,7 +34,95 @@ export function TrackedBillsView({
   popupFallbackAvailable,
   onGooglePopupFallback,
 }: TrackedBillsViewProps) {
+  const [rows, setRows] = useState<TrackedBillRow[]>([]);
+  const [cursor, setCursor] = useState<TrackedBillsCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  const loadingMoreRef = useRef(false);
+  const initialRestoreRef = useRef({
+    billId: restoreTargetBillId,
+    visibleCount: restoreVisibleCount,
+  });
   const newBillCount = getUnseenTrackedBills(rows).length;
+
+  useEffect(() => {
+    let active = true;
+    const { billId: targetBillId, visibleCount: targetVisibleCount } = initialRestoreRef.current;
+    const loadInitialPages = async () => {
+      const loadedRows: TrackedBillRow[] = [];
+      let nextCursor: TrackedBillsCursor | null = null;
+      let hasMorePages = false;
+      try {
+        let page = await getTrackedBillsPage(uid);
+        loadedRows.push(...page.rows);
+        nextCursor = page.nextCursor;
+        hasMorePages = page.hasMore;
+
+        while (
+          active &&
+          nextCursor &&
+          targetBillId &&
+          targetVisibleCount !== null &&
+          (loadedRows.length < targetVisibleCount ||
+            !loadedRows.some((row) => row.bill.id === targetBillId))
+        ) {
+          page = await getTrackedBillsPage(uid, nextCursor);
+          loadedRows.push(...page.rows);
+          nextCursor = page.nextCursor;
+          hasMorePages = page.hasMore;
+        }
+
+        if (active) {
+          setRows(loadedRows);
+          setCursor(nextCursor);
+          setHasMore(hasMorePages);
+        }
+      } catch (reason) {
+        console.error('Could not load tracked bills:', reason);
+        if (active) {
+          setRows(loadedRows);
+          setCursor(nextCursor);
+          setHasMore(hasMorePages);
+          setError(true);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void loadInitialPages();
+    return () => { active = false; };
+  }, [retryKey, uid]);
+
+  useEffect(() => {
+    if (loading || !restoreTargetBillId) return;
+    const target = Array.from(document.querySelectorAll<HTMLElement>('[data-public-bill-id]'))
+      .find((element) => element.dataset.publicBillId === restoreTargetBillId);
+    target?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    onRestoreComplete();
+  }, [loading, onRestoreComplete, restoreTargetBillId, rows]);
+
+  const loadMore = async () => {
+    if (!cursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setError(false);
+    try {
+      const page = await getTrackedBillsPage(uid, cursor);
+      setRows((current) => [...current, ...page.rows]);
+      setCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch (reason) {
+      console.error('Could not load the next tracked bills page:', reason);
+      setError(true);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <section className="tracked-bills-view">
@@ -63,7 +158,7 @@ export function TrackedBillsView({
           <p>別の端末でも同じGoogleアカウントで利用できます。</p>
         </section>
       )}
-      {!loading && !error && newBillCount > 0 && (
+      {!loading && !hasMore && !error && newBillCount > 0 && (
         <p className="tracked-bills-new-summary" role="status">
           {newBillCount}枚のお札に新しい発見があります
         </p>
@@ -77,7 +172,8 @@ export function TrackedBillsView({
           <p>最初に登録したお札が、ここに表示されます。</p>
         </div>
       ) : null}
-      <div className="tracked-bills-list">
+      {error && rows.length > 0 && <p role="alert">次のお札を読み込めませんでした。もう一度お試しください。</p>}
+      <div className="tracked-bills-list" aria-label="登録したお札の一覧">
         {rows.map((row) => {
           const { bill } = row;
           const latestSighting = bill.sightings[bill.sightings.length - 1];
@@ -86,7 +182,8 @@ export function TrackedBillsView({
             <button
               className="tracked-bill-card"
               key={bill.id}
-              onClick={() => onSelectBill(bill.id)}
+              data-public-bill-id={bill.id}
+              onClick={() => onSelectBill(bill.id, rows.length)}
             >
               <span className="tracked-bill-card-main">
                 <strong>{row.serialNumber}</strong>
@@ -115,6 +212,23 @@ export function TrackedBillsView({
           );
         })}
       </div>
+      {!loading && hasMore && (
+        <button className="btn-secondary public-bills-more" onClick={loadMore} disabled={loadingMore}>
+          {loadingMore ? '読み込んでいます…' : 'もっと見る'}
+        </button>
+      )}
+      {!loading && error && rows.length === 0 && (
+        <button
+          className="btn-secondary public-bills-retry"
+          onClick={() => {
+            setLoading(true);
+            setError(false);
+            setRetryKey((key) => key + 1);
+          }}
+        >
+          もう一度読み込む
+        </button>
+      )}
     </section>
   );
 }
