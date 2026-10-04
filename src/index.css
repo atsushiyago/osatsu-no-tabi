@@ -131,15 +131,15 @@ body {
 /* メインコンテンツエリア */
 .main-content {
   flex: 1;
-  padding: 16px 18px 84px;
+  padding: 16px 18px calc(84px + env(safe-area-inset-bottom));
 }
 
 /* ボトムナビゲーションバー（スマホ用） */
 .bottom-nav {
   position: fixed;
+  inset-inline: 0;
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  margin-inline: auto;
   width: 100%;
   max-width: 480px;
   z-index: 1000;
