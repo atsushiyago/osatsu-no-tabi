@@ -13,16 +13,21 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 
+const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
+const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
+if (![firestoreHost, authHost].every((host) => /^127\.0\.0\.1:[0-9]+$/.test(host))) throw new Error('Loopback emulators required');
+const firestorePort = Number(firestoreHost.split(':')[1]);
+
 const projectId = 'demo-george-strict-rate-limit';
 const anonymousApp = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'strict-auth');
 const auth = getAuth(anonymousApp);
-connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+connectAuthEmulator(auth, `http://${authHost}`, { disableWarnings: true });
 const db = getFirestore(anonymousApp);
-connectFirestoreEmulator(db, '127.0.0.1', 8080);
+connectFirestoreEmulator(db, '127.0.0.1', firestorePort);
 
 const unauthenticatedApp = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'strict-unauth');
 const unauthenticatedDb = getFirestore(unauthenticatedApp);
-connectFirestoreEmulator(unauthenticatedDb, '127.0.0.1', 8080);
+connectFirestoreEmulator(unauthenticatedDb, '127.0.0.1', firestorePort);
 
 let passed = 0;
 let failed = 0;
@@ -165,7 +170,7 @@ async function setRateFixture(uid, {
     lastOperationSightingId: { stringValue: lastOperationSightingId ?? rate.lastOperationSightingId },
   };
   const mask = Object.keys(values).map((field) => `updateMask.fieldPaths=${field}`).join('&');
-  const url = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/rateLimits/${uid}?${mask}`;
+  const url = `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/rateLimits/${uid}?${mask}`;
   const response = await fetch(url, {
     method: 'PATCH',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
@@ -175,7 +180,7 @@ async function setRateFixture(uid, {
 }
 
 async function setBillCooldown(billId, isoTime) {
-  const url = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/bills/${billId}?updateMask.fieldPaths=lastSightedAtServer`;
+  const url = `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/bills/${billId}?updateMask.fieldPaths=lastSightedAtServer`;
   const response = await fetch(url, {
     method: 'PATCH',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
@@ -197,7 +202,7 @@ async function seedLegacyBill(billId) {
     firstSightedAt: { stringValue: iso },
     lastSightedAt: { stringValue: iso },
   };
-  const url = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/bills?documentId=${billId}`;
+  const url = `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/bills?documentId=${billId}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
@@ -297,7 +302,7 @@ async function main() {
       lastOperationSightingId: { stringValue: 'seeded-sighting' },
     },
   };
-  const otherRateUrl = `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/rateLimits/${otherUid}`;
+  const otherRateUrl = `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/rateLimits/${otherUid}`;
   const otherRateResponse = await fetch(otherRateUrl, {
     method: 'PATCH',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },

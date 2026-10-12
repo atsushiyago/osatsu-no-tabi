@@ -381,6 +381,7 @@ export function App() {
           <RegisterView
             initialSerial={registerInitialSerial}
             onSuccess={handleRegisterSuccess}
+            onViewBill={(id) => navigateTo('bill', id)}
             onCancel={() => navigateTo('home')}
           />
         )}

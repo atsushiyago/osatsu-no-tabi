@@ -5,12 +5,19 @@ import {
   getToken,
   type AppCheck,
 } from 'firebase/app-check';
-import { initializeFirestore, type Firestore } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
+import { connectFirestoreEmulator, initializeFirestore, type Firestore } from 'firebase/firestore';
+import { connectAuthEmulator, getAuth, signInAnonymously, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
 import { isDebugTiming } from '../utils/debug';
 import { getOrCreateAnonymousUser } from './anonymousSession.js';
 
-const firebaseConfig = {
+import { identityV2Enabled, identityEmulatorEnabled, IDENTITY_EMULATOR_PROJECT, IDENTITY_FIRESTORE_PORT, IDENTITY_AUTH_PORT } from '../utils/identityEnvironment';
+
+export const useFirebaseEmulators = import.meta.env.DEV && identityEmulatorEnabled(true, import.meta.env.VITE_USE_FIREBASE_EMULATORS);
+export const isIdentityV2Enabled = identityV2Enabled(import.meta.env.VITE_BILL_IDENTITY_V2);
+const firebaseConfig = useFirebaseEmulators ? {
+  apiKey: 'fake-api-key', projectId: IDENTITY_EMULATOR_PROJECT,
+  authDomain: 'localhost', appId: 'demo-identity-v2',
+} : {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -35,7 +42,7 @@ export const isAppCheckConfigured = Boolean(
 
 // 開発環境（DEV）限定の Debug Provider 設定
 // ※ 本番ビルド（import.meta.env.PROD）では Dead Code Elimination により安全に無効化されます
-if (import.meta.env.DEV && typeof window !== 'undefined') {
+if (!useFirebaseEmulators && import.meta.env.DEV && typeof window !== 'undefined') {
   const debugEnv = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG;
   if (debugEnv === 'true' || debugEnv === true) {
     // @ts-expect-error FIREBASE_APPCHECK_DEBUG_TOKEN is used by Firebase App Check SDK
@@ -57,10 +64,12 @@ let auth: Auth | null = null;
 
 if (isFirebaseConfigured) {
   try {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+    app = useFirebaseEmulators
+      ? getApps().find((item) => item.name === 'identity-v2-emulator') ?? initializeApp(firebaseConfig, 'identity-v2-emulator')
+      : getApps().find((item) => item.name === '[DEFAULT]') ?? initializeApp(firebaseConfig);
 
     // 1. App Check の初期化（Firestore 初期化の前）
-    if (typeof window !== 'undefined' && !appCheck) {
+    if (!useFirebaseEmulators && typeof window !== 'undefined' && !appCheck) {
       if (isAppCheckConfigured) {
         try {
           appCheck = initializeAppCheck(app, {
@@ -100,6 +109,7 @@ if (isFirebaseConfigured) {
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
     });
+    if (useFirebaseEmulators) connectFirestoreEmulator(db, '127.0.0.1', IDENTITY_FIRESTORE_PORT);
     console.info('Firebase Firestore initialized with experimentalForceLongPolling: true');
   } catch (err) {
     console.error('Failed to initialize Firebase:', err);
@@ -120,6 +130,7 @@ if (isFirebaseConfigured) {
 if (app) {
   try {
     auth = getAuth(app);
+    if (useFirebaseEmulators) connectAuthEmulator(auth, `http://127.0.0.1:${IDENTITY_AUTH_PORT}`, { disableWarnings: true });
   } catch (err) {
     console.warn('Firebase Auth is unavailable; device bill list is disabled:', err);
   }

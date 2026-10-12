@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, Compass, CheckCircle, AlertCircle } from 'lucide-react';
 import { getBillBySerial } from '../services/billService';
 import { prepareSerialSearch, runValidatedSerialSearch } from '../utils/serialSearch';
@@ -6,13 +6,19 @@ import { useSerialInput } from '../hooks/useSerialInput';
 import { isDebugTiming } from '../utils/debug';
 import { useI18n } from '../useI18n';
 
+import { isIdentityV2Enabled } from '../services/firebase';
+import { searchBillIdentities, type IdentityCandidate } from '../services/billIdentityUiService';
+import { BANKNOTE_VARIANT_LABELS } from '../data/banknoteVariants';
+import { createRequestVersion } from '../utils/identitySearch';
+import type { TranslationKey } from '../i18n';
+
 interface SearchViewProps {
   onBillFound: (serial: string) => void;
   onRegisterNew: (serial: string) => void;
 }
 
 export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
-  const { language, t } = useI18n();
+  const { language, t, number, yen } = useI18n();
   const {
     value: searchInput,
     setValue: setSearchInput,
@@ -25,6 +31,15 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [candidates, setCandidates] = useState<IdentityCandidate[]>([]);
+  const [searchError, setSearchError] = useState<TranslationKey | null>(null);
+  const requests = useRef(createRequestVersion());
+  useEffect(() => () => { requests.current.next(); }, []);
+  const invalidateSearch = () => {
+    requests.current.next(); setCandidates([]); setSearchError(null); setNotFound(false);
+    setSearchedSerial(null); setIsSearching(false);
+  };
+
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +53,8 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
 
     if (isDebugTiming()) console.debug('[Search Debug] serialIndex exact lookup requested');
 
-    setNotFound(false);
+    const requestVersion = requests.current.next();
+    setNotFound(false); setCandidates([]); setSearchError(null);
     setSearchInput(request.serial);
     if (!request.isValid) {
       setSearchedSerial(null);
@@ -49,12 +65,18 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     setSearchedSerial(request.serial);
 
     try {
+      if (isIdentityV2Enabled) {
+        const matches = await searchBillIdentities(request.serial);
+        if (requests.current.isCurrent(requestVersion)) { setCandidates(matches); setNotFound(matches.length === 0); }
+        return;
+      }
       const searchResult = await runValidatedSerialSearch(rawInput, getBillBySerial);
       if (searchResult.status === 'invalid') {
         setSearchedSerial(null);
         return;
       }
 
+      if (!requests.current.isCurrent(requestVersion)) return;
       const bill = searchResult.result;
       if (bill) {
         onBillFound(bill.id);
@@ -62,10 +84,13 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
         setNotFound(true);
       }
     } catch (err) {
-      console.error('Search failed:', err);
-      setNotFound(true);
+      console.error('Search failed:', (err as { code?: string }).code ?? 'unknown');
+      if (requests.current.isCurrent(requestVersion)) {
+        const code = (err as { code?: string }).code;
+        setSearchError(code === 'invalid-connection' ? 'identityConfigError' : code === 'permission-denied' ? 'identitySearchDenied' : code === 'emulator-unavailable' || code === 'emulator-only' ? 'identityUnavailable' : 'identitySearchError');
+      }
     } finally {
-      setIsSearching(false);
+      if (requests.current.isCurrent(requestVersion)) setIsSearching(false);
     }
   };
 
@@ -95,12 +120,12 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               value={searchInput}
               onChange={(e) => {
                 onSerialInputChange(e.target.value);
-                setNotFound(false);
+                invalidateSearch();
               }}
-              onCompositionStart={onCompositionStart}
+              onCompositionStart={() => { onCompositionStart(); invalidateSearch(); }}
               onCompositionEnd={(e) => {
                 onCompositionEnd(e.currentTarget.value);
-                setNotFound(false);
+                invalidateSearch();
               }}
               maxLength={12}
               inputMode="text"
@@ -147,6 +172,19 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           <span>{isSearching ? t('searching') : t('executeSearch')}</span>
         </button>
       </form>
+
+      {searchError && <p role="alert" className="identity-notice">{t(searchError)}</p>}
+      {isIdentityV2Enabled && candidates.length > 0 && <section aria-label={t('identitySearchResults', { count: number(candidates.length) })}>
+        <h3>{t('identitySearchResults', { count: number(candidates.length) })}</h3>
+        <p className="input-hint">{t('identitySearchHint')}</p>
+        <div className="identity-candidates">{candidates.map(({ bill, legacy }) => <article className="identity-candidate" key={bill.id}>
+          <strong>{t('yenBill', { amount: language === 'ja' ? number(bill.denomination) : yen(bill.denomination) })}</strong>
+          <p>{legacy ? t('identityLegacy') : `${bill.series ? BANKNOTE_VARIANT_LABELS[language].series[bill.series] : t('unknown')} · ${bill.serialColor ? BANKNOTE_VARIANT_LABELS[language].colors[bill.serialColor] : t('unknown')}`}</p>
+          <p>{t('journeyBill', { id: bill.id.slice(-4).toUpperCase() })}</p>
+          <button type="button" className="btn-secondary" onClick={() => onBillFound(bill.id)}>{t('identityView')}</button>
+        </article>)}</div>
+        <button type="button" className="btn-primary" style={{ marginTop: 16 }} onClick={() => searchedSerial && onRegisterNew(searchedSerial)}>{t('registerBill')}</button>
+      </section>}
 
       {/* 検索結果なしの場合 */}
       {notFound && searchedSerial && (

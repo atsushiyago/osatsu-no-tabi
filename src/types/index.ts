@@ -1,8 +1,11 @@
 import type { Timestamp } from 'firebase/firestore';
 
-export type Denomination = 1000 | 5000 | 10000;
+export type Denomination = 1000 | 2000 | 5000 | 10000;
 
 export interface Bill {
+  identityVersion?: 2;
+  series?: import('../data/banknoteVariants').BillSeries;
+  serialColor?: import('../data/banknoteVariants').SerialColor;
   id: string; // opaque publicBillId
   denomination: Denomination;
   createdAt: string; // ISO string

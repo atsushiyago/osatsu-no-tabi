@@ -7,24 +7,30 @@ import {
 } from 'firebase/firestore';
 
 const projectId = 'demo-osatsu-public-serial';
+const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
+const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
+if (![firestoreHost, authHost].every((host) => /^127\.0\.0\.1:[0-9]+$/.test(host))) {
+  throw new Error('Rules tests require loopback emulator hosts');
+}
+const firestorePort = Number(firestoreHost.split(':')[1]);
 const app = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'public-serial-test');
 const auth = getAuth(app);
-connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+connectAuthEmulator(auth, `http://${authHost}`, { disableWarnings: true });
 const db = getFirestore(app);
-connectFirestoreEmulator(db, '127.0.0.1', 8080);
+connectFirestoreEmulator(db, '127.0.0.1', firestorePort);
 const app2 = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'public-serial-other-user');
 const auth2 = getAuth(app2);
-connectAuthEmulator(auth2, 'http://127.0.0.1:9099', { disableWarnings: true });
+connectAuthEmulator(auth2, `http://${authHost}`, { disableWarnings: true });
 const db2 = getFirestore(app2);
-connectFirestoreEmulator(db2, '127.0.0.1', 8080);
+connectFirestoreEmulator(db2, '127.0.0.1', firestorePort);
 const app4 = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'public-serial-attacker');
 const auth4 = getAuth(app4);
-connectAuthEmulator(auth4, 'http://127.0.0.1:9099', { disableWarnings: true });
+connectAuthEmulator(auth4, `http://${authHost}`, { disableWarnings: true });
 const db4 = getFirestore(app4);
-connectFirestoreEmulator(db4, '127.0.0.1', 8080);
+connectFirestoreEmulator(db4, '127.0.0.1', firestorePort);
 const app3 = initializeApp({ projectId, apiKey: 'fake-api-key' }, 'public-serial-unauthenticated');
 const unauthDb = getFirestore(app3);
-connectFirestoreEmulator(unauthDb, '127.0.0.1', 8080);
+connectFirestoreEmulator(unauthDb, '127.0.0.1', firestorePort);
 
 let passed = 0;
 let failed = 0;
@@ -39,7 +45,7 @@ async function check(name, fn, reject = false) {
     if (reject) throw new Error('expected rejection');
     console.log(`  ✔ ${name}`); passed++;
   } catch (error) {
-    if (reject && error.message !== 'expected rejection') { console.log(`  ✔ ${name} (denied)`); passed++; }
+    if (reject && error.code === 'permission-denied') { console.log(`  ✔ ${name} (denied)`); passed++; }
     else { console.error(`  ✘ ${name}: ${error.message}`); failed++; }
   }
 }
@@ -60,7 +66,10 @@ function nextRate(rate, publicBillId, sightingId) {
 
 async function writeOperation(expected = serial(), overrides = {}, { firestore = db, userAuth = auth } = {}) {
   const uid = userAuth.currentUser.uid;
-  const indexRef = doc(firestore, 'serialIndex', expected);
+  const series = /^[A-Z]{2}[0-9]{6}[A-Z]{2}$/.test(expected) ? 'F' : 'E';
+  const identity = { identityVersion: 2, denomination: 1000, series, serialColor: 'black', serialNumber: expected };
+  const identityKey = `v2_JPY_1000_${series}_black_${expected}`;
+  const indexRef = doc(firestore, 'billIdentityIndex', identityKey);
   const rateRef = doc(firestore, 'rateLimits', uid);
   const sightingRef = doc(collection(firestore, 'sightings'));
   const proposedId = opaque();
@@ -74,19 +83,20 @@ async function writeOperation(expected = serial(), overrides = {}, { firestore =
     const trackedSnap = await tx.get(trackedRef);
     const step = billSnap?.exists() ? billSnap.data().sightingsCount + 1 : 1;
     const sighting = {
-      id: sightingRef.id, publicBillId, step, prefecture: '東京都', municipality: '千代田区',
+      identityVersion: 2, id: sightingRef.id, publicBillId, step, prefecture: '東京都', municipality: '千代田区',
       createdAt: now, distanceFromPrevKm: 0, daysFromPrev: 0,
     };
     if (!billSnap?.exists()) {
-      tx.set(indexRef, { publicBillId: overrides.index?.publicBillId ?? publicBillId, createdAt: serverTimestamp() });
+      tx.set(indexRef, { ...identity, publicBillId: overrides.index?.publicBillId ?? publicBillId, createdAt: serverTimestamp() });
+      tx.set(doc(firestore, 'billIdentities', publicBillId), { ...identity, publicBillId, identityKey, createdAt: serverTimestamp() });
       tx.set(billRef, {
-        id: publicBillId, denomination: 1000, createdAt: now, updatedAt: now,
+        identityVersion: 2, series, serialColor: 'black', id: publicBillId, denomination: 1000, createdAt: now, updatedAt: now,
         sightingsCount: 1, totalDistanceKm: 0, firstSightedAt: now, lastSightedAt: now,
         lastSightedAtServer: serverTimestamp(), lastMunicipality: '千代田区', lastSightingId: sightingRef.id,
         ...overrides.publicBill,
       });
       tx.set(trackedRef, {
-        publicBillId, serialNumber: expected, denomination: 1000, createdAt: serverTimestamp(),
+        ...identity, publicBillId, createdAt: serverTimestamp(),
         firstRegisteredByMe: true, notifyOnRediscovery: false, lastSeenSightingsCount: 1,
         lastSeenAt: serverTimestamp(), lastSeenMunicipality: '千代田区',
         ...overrides.tracked,
@@ -105,7 +115,7 @@ async function writeOperation(expected = serial(), overrides = {}, { firestore =
         });
       } else {
         tx.set(trackedRef, {
-          publicBillId, serialNumber: expected, denomination: billSnap.data().denomination,
+          ...identity, publicBillId, denomination: billSnap.data().denomination,
           createdAt: serverTimestamp(), firstRegisteredByMe: false, notifyOnRediscovery: false,
           lastSeenSightingsCount: step, lastSeenAt: serverTimestamp(), lastSeenMunicipality: '千代田区',
           ...overrides.tracked,
@@ -115,7 +125,7 @@ async function writeOperation(expected = serial(), overrides = {}, { firestore =
     tx.set(sightingRef, { ...sighting, ...overrides.sighting });
     const rate = rateSnap.exists() ? rateSnap.data() : null;
     if (!overrides.skipRate) tx.set(rateRef, { ...nextRate(rate, publicBillId, sightingRef.id), ...overrides.rate });
-    return { publicBillId, sightingId: sightingRef.id, serial: expected };
+    return { publicBillId, sightingId: sightingRef.id, serial: expected, identityKey };
   });
 }
 
@@ -135,7 +145,7 @@ async function writeByPublicIdOnly(publicBillId, firestore = db, userAuth = auth
       lastMunicipality: '横浜市', lastSightingId: sightingRef.id,
     });
     tx.set(sightingRef, {
-      id: sightingRef.id, publicBillId, step, prefecture: '神奈川県', municipality: '横浜市',
+      identityVersion: 2, id: sightingRef.id, publicBillId, step, prefecture: '神奈川県', municipality: '横浜市',
       createdAt: now, distanceFromPrevKm: 0, daysFromPrev: 0,
     });
     tx.set(rateRef, nextRate(rateSnap.data(), publicBillId, sightingRef.id));
@@ -150,7 +160,7 @@ async function adminPatch(path, fields) {
     return `${key}=${encodeURIComponent(JSON.stringify(encoded))}`;
   }).join('&');
   const qs = values.replaceAll('%3D', '=').replaceAll('%26', '&').replaceAll('%3A', ':').replaceAll('%22', '"');
-  const response = await fetch(`http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/${path}?${Object.keys(fields).map((key) => `updateMask.fieldPaths=${key}`).join('&')}`, {
+  const response = await fetch(`http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/${path}?${Object.keys(fields).map((key) => `updateMask.fieldPaths=${key}`).join('&')}`, {
     method: 'PATCH', headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key,
       value instanceof Date ? { timestampValue: value.toISOString() } : typeof value === 'number' ? { integerValue: String(value) } : { stringValue: value },
@@ -160,7 +170,7 @@ async function adminPatch(path, fields) {
 }
 
 async function seedLegacySighting() {
-  const response = await fetch(`http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/sightings?documentId=legacy-serial-leak`, {
+  const response = await fetch(`http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents/sightings?documentId=legacy-serial-leak`, {
     method: 'POST', headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: {
       id: { stringValue: 'legacy-serial-leak' }, billId: { stringValue: 'AA123456B' }, step: { integerValue: '1' },
@@ -176,13 +186,14 @@ async function main() {
   const user = (await signInAnonymously(auth)).user;
   await signInAnonymously(auth2);
   await signInAnonymously(auth4);
-  console.log('=== Opaque public serial schema Rules tests ===');
+  console.log('=== Original 56 strict cases adapted to v2 Rules ===');
+  await adminPatch('appConfig/billRegistration', { mode: 'v2', identityVersion: 2 });
 
   const initial = await writeOperation();
   await seedLegacySighting();
-  await check('初回登録 transaction: index/publicBill/sighting/tracked/rateLimit が同時作成', async () => {
+  await check('初回v2登録 transaction: forward/reverse/publicBill/sighting/tracked/rateLimit が同時作成', async () => {
     const [i, b, s, t, r] = await Promise.all([
-      getDoc(doc(db, 'serialIndex', initial.serial)), getDoc(doc(db, 'publicBills', initial.publicBillId)),
+      getDoc(doc(db, 'billIdentityIndex', initial.identityKey)), getDoc(doc(db, 'publicBills', initial.publicBillId)),
       getDoc(doc(db, 'sightings', initial.sightingId)), getDoc(doc(db, 'users', user.uid, 'trackedBills', initial.publicBillId)),
       getDoc(doc(db, 'rateLimits', user.uid)),
     ]);
@@ -199,12 +210,13 @@ async function main() {
   ]) {
     await check(`Rules: invalid serial ${rejectedSerial} rejected`, async () => writeOperation(rejectedSerial), true);
   }
-  await check('serialIndex exact get許可', async () => { if (!(await getDoc(doc(db, 'serialIndex', initial.serial))).exists()) throw new Error('not found'); });
+  await adminPatch(`serialIndex/${initial.serial}`, { publicBillId: initial.publicBillId, createdAt: new Date() });
+  await check('旧serialIndex exact get許可', async () => { if (!(await getDoc(doc(db, 'serialIndex', initial.serial))).exists()) throw new Error('not found'); });
   await check('serialIndex collection list拒否', async () => getDocs(collection(db, 'serialIndex')), true);
   await check('serialIndex query拒否', async () => getDocs(query(collection(db, 'serialIndex'), where('publicBillId', '==', initial.publicBillId))), true);
   await check('serialIndex arbitrary update拒否', async () => updateDoc(doc(db, 'serialIndex', initial.serial), { publicBillId: opaque() }), true);
-  await check('不正serialのserialIndex作成拒否', async () => writeOperation('INVALID'), true);
-  await check('serialIndexとpublicBillの対応不整合拒否', async () => writeOperation(serial(), { index: { publicBillId: opaque() } }), true);
+  await check('不正serialのv2索引作成拒否', async () => writeOperation('INVALID'), true);
+  await check('v2索引とpublicBillの対応不整合拒否', async () => writeOperation(serial(), { index: { publicBillId: opaque() } }), true);
   await check('publicBills get/list許可', async () => {
     if (!(await getDoc(doc(db, 'publicBills', initial.publicBillId))).exists()) throw new Error('get failed');
     const publicBills = collection(db, 'publicBills');
@@ -277,7 +289,7 @@ async function main() {
   const other = await writeOperation();
   await adminPatch(`publicBills/${initial.publicBillId}`, { lastSightedAtServer: new Date('2000-01-01T00:00:00Z') });
   await adminPatch(`users/${user.uid}/trackedBills/${initial.publicBillId}`, { serialNumber: other.serial });
-  await check('事前trackedBillがserialIndexとの対応不一致なら再発見拒否', async () => writeOperation(initial.serial), true);
+  await check('事前trackedBillがv2識別との対応不一致なら再発見拒否', async () => writeOperation(initial.serial), true);
   await adminPatch(`users/${user.uid}/trackedBills/${initial.publicBillId}`, { serialNumber: initial.serial });
   await adminPatch(`publicBills/${initial.publicBillId}`, { lastSightedAtServer: new Date('2000-01-01T00:00:00Z') });
   await adminPatch(`publicBills/${initial.publicBillId}`, { lastSightedAtServer: new Date('2000-01-01T00:00:00Z') });
@@ -307,6 +319,12 @@ async function main() {
     if (current.dailyCount < 50) await writeOperation();
   }
   await check('24時間内50回上限後は拒否', async () => writeOperation(), true);
+  // Keep the following mutation checks eligible for a normal operation so the
+  // daily cap cannot accidentally mask a broken counter/timestamp validator.
+  await adminPatch(`rateLimits/${user.uid}`, {
+    shortWindowStartedAt: new Date(), shortCount: 2,
+    dailyWindowStartedAt: new Date(), dailyCount: 2,
+  });
   await check('count飛ばし増加拒否', async () => writeOperation(serial(), { rate: { shortCount: 9 } }), true);
   await check('count減少拒否', async () => writeOperation(serial(), { rate: { shortCount: 1 } }), true);
   await check('updatedAt偽装拒否', async () => writeOperation(serial(), { rate: { updatedAt: new Date('2000-01-01T00:00:00Z') } }), true);

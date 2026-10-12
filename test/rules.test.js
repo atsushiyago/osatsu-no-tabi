@@ -16,22 +16,27 @@ import {
 } from 'firebase/firestore';
 import { getOrCreateAnonymousUser } from '../src/services/anonymousSession.js';
 
+const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
+const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
+if (![firestoreHost, authHost].every((host) => /^127\.0\.0\.1:[0-9]+$/.test(host))) throw new Error('Loopback emulators required');
+const firestorePort = Number(firestoreHost.split(':')[1]);
+
 const app = initializeApp({
   projectId: 'demo-george-rules-test',
   apiKey: 'fake-api-key',
 });
 
 const db = getFirestore(app);
-connectFirestoreEmulator(db, '127.0.0.1', 8080);
+connectFirestoreEmulator(db, '127.0.0.1', firestorePort);
 
 const authApp = initializeApp({
   projectId: 'demo-george-rules-test',
   apiKey: 'fake-api-key',
 }, 'anonymous-auth-test');
 const auth = getAuth(authApp);
-connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+connectAuthEmulator(auth, `http://${authHost}`, { disableWarnings: true });
 const authenticatedDb = getFirestore(authApp);
-connectFirestoreEmulator(authenticatedDb, '127.0.0.1', 8080);
+connectFirestoreEmulator(authenticatedDb, '127.0.0.1', firestorePort);
 
 let passedCount = 0;
 let failedCount = 0;
@@ -59,7 +64,7 @@ async function assertReject(name, fn) {
 }
 
 async function setTrustedClockForTest(billId, isoTime) {
-  const url = `http://127.0.0.1:8080/v1/projects/demo-george-rules-test/databases/(default)/documents/bills/${billId}?updateMask.fieldPaths=lastSightedAtServer`;
+  const url = `http://${firestoreHost}/v1/projects/demo-george-rules-test/databases/(default)/documents/bills/${billId}?updateMask.fieldPaths=lastSightedAtServer`;
   const response = await fetch(url, {
     method: 'PATCH',
     headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' },
@@ -69,7 +74,7 @@ async function setTrustedClockForTest(billId, isoTime) {
 }
 
 async function seedLegacyBillForTest(billId, isoTime) {
-  const url = `http://127.0.0.1:8080/v1/projects/demo-george-rules-test/databases/(default)/documents/bills?documentId=${billId}`;
+  const url = `http://${firestoreHost}/v1/projects/demo-george-rules-test/databases/(default)/documents/bills?documentId=${billId}`;
   const fields = {
     id: { stringValue: billId },
     serialNumber: { stringValue: billId },

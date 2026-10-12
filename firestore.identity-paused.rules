@@ -1,0 +1,234 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Hard registration pause. Read access and owner personal settings remain available.
+    match /bills/{id} { allow read, write: if false; }
+    match /serialIndex/{serial} {
+      allow get: if request.auth != null;
+      allow list, write: if false;
+    }
+    match /appConfig/{id} {
+      allow get: if id == 'billRegistration';
+      allow list, write: if false;
+    }
+    match /billIdentityIndex/{key} {
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create: if false;
+      allow update, delete: if false;
+    }
+    match /billIdentities/{id} {
+      // A public UUID must never reveal the complete serial through reverse lookup.
+      allow read: if false;
+      allow create: if false;
+      allow update, delete: if false;
+    }
+    match /publicBills/{id} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /sightings/{id} {
+      allow read: if resource.data.keys().hasAll(['publicBillId']) && opaque(resource.data.publicBillId);
+      allow create: if false;
+      allow update, delete: if false;
+    }
+    match /rateLimits/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // The gate is centralized here. Every bill operation requires a fresh sighting
+      // and a rate document pointing to that sighting; an existing pointer cannot pass.
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /users/{uid}/trackedBills/{id} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if false;
+      allow update: if request.auth != null && request.auth.uid == uid
+        && resource.data.publicBillId == id && metadataUpdate(request.resource.data, resource.data, get(/databases/$(database)/documents/publicBills/$(id)).data);
+      allow delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+
+    function opaque(id) {
+      return id is string && id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
+    function validSerial(serial) {
+      return serial is string && (
+        serial.matches('^[A-HJ-NP-Z]{1,2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]$')
+        || serial.matches('^[A-HJ-NP-Z]{2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]{2}$'));
+    }
+    function containsSerial(text) {
+      return text.matches('(?s).*([A-Za-zＡ-Ｚａ-ｚ][ 　-]*){1,2}([0-9０-９][ 　-]*){6}[A-Za-zＡ-Ｚａ-ｚ].*');
+    }
+    function variant(d) {
+      return d.identityVersion == 2 && d.denomination is int && (
+        (d.series == 'D' && (
+          (d.denomination == 1000 && d.serialColor in ['black', 'blue', 'brown', 'darkgreen'])
+          || (d.denomination == 2000 && d.serialColor == 'black')
+          || (d.denomination in [5000, 10000] && d.serialColor in ['black', 'brown'])))
+        || (d.series == 'E' && (
+          (d.denomination == 1000 && d.serialColor in ['black', 'brown', 'navy'])
+          || (d.denomination in [5000, 10000] && d.serialColor in ['black', 'brown'])))
+        || (d.series == 'F' && d.denomination in [1000, 5000, 10000] && d.serialColor == 'black'));
+    }
+    function identity(d) {
+      return variant(d) && validSerial(d.serialNumber)
+        && ((d.series == 'F' && d.serialNumber.matches('^[A-HJ-NP-Z]{2}[0-9]{6}[A-HJ-NP-Z]{2}$'))
+          || (d.series in ['D', 'E'] && d.serialNumber.matches('^[A-HJ-NP-Z]{1,2}[0-9]{6}[A-HJ-NP-Z]$')));
+    }
+    function key(d) {
+      let amount = d.denomination == 1000 ? '1000' : d.denomination == 2000 ? '2000' : d.denomination == 5000 ? '5000' : '10000';
+      return 'v2_JPY_' + amount + '_' + d.series + '_' + d.serialColor + '_' + d.serialNumber;
+    }
+    function sameVariant(a, b) {
+      return a.identityVersion == b.identityVersion && a.denomination == b.denomination
+        && a.series == b.series && a.serialColor == b.serialColor;
+    }
+    function sameIdentity(a, b) { return sameVariant(a, b) && a.serialNumber == b.serialNumber; }
+    function indexFields(d) {
+      return d.keys().hasAll(['identityVersion', 'denomination', 'series', 'serialColor', 'serialNumber', 'publicBillId', 'createdAt'])
+        && d.keys().hasOnly(['identityVersion', 'denomination', 'series', 'serialColor', 'serialNumber', 'publicBillId', 'createdAt']);
+    }
+    function validIndex(indexKey) {
+      let d = request.resource.data;
+      let reverse = getAfter(/databases/$(database)/documents/billIdentities/$(d.publicBillId)).data;
+      return indexFields(d) && identity(d) && opaque(d.publicBillId) && indexKey == key(d)
+        && d.createdAt == request.time && reverse.identityKey == indexKey
+        && reverse.publicBillId == d.publicBillId && sameIdentity(d, reverse);
+    }
+    function validReverse(id) {
+      let d = request.resource.data;
+      let forward = getAfter(/databases/$(database)/documents/billIdentityIndex/$(d.identityKey)).data;
+      let billPath = /databases/$(database)/documents/publicBills/$(id);
+      let bill = getAfter(billPath).data;
+      return d.keys().hasAll(['identityVersion', 'denomination', 'series', 'serialColor', 'serialNumber', 'publicBillId', 'identityKey', 'createdAt'])
+        && d.keys().hasOnly(['identityVersion', 'denomination', 'series', 'serialColor', 'serialNumber', 'publicBillId', 'identityKey', 'createdAt'])
+        && identity(d) && d.publicBillId == id && d.identityKey == key(d) && d.createdAt == request.time
+        && forward.publicBillId == id && sameIdentity(d, forward)
+        && !exists(billPath) && bill.id == id && sameVariant(d, bill)
+        && bill.lastSightedAtServer == request.time && bill.sightingsCount == 1;
+    }
+    function billFields(d) {
+      return d.keys().hasAll(['identityVersion', 'series', 'serialColor', 'id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && d.keys().hasOnly(['identityVersion', 'series', 'serialColor', 'id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && variant(d) && d.createdAt is string && d.updatedAt is string && d.firstSightedAt is string && d.lastSightedAt is string
+        && d.sightingsCount is int && d.totalDistanceKm is number && d.totalDistanceKm >= 0
+        && d.lastMunicipality is string && d.lastMunicipality.size() >= 1 && d.lastMunicipality.size() <= 50
+        && d.lastSightingId is string && d.lastSightingId.size() >= 1 && d.lastSightingId.size() <= 150
+        && d.lastSightedAtServer == request.time;
+    }
+    function billOperation(id, d) {
+      let tracked = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/trackedBills/$(id)).data;
+      let sighting = getAfter(/databases/$(database)/documents/sightings/$(d.lastSightingId)).data;
+      let rate = getAfter(/databases/$(database)/documents/rateLimits/$(request.auth.uid)).data;
+      return tracked.publicBillId == id && sameVariant(tracked, d)
+        && tracked.lastSeenSightingsCount == d.sightingsCount && tracked.lastSeenAt == request.time
+        && sighting.identityVersion == 2 && sighting.publicBillId == id && sighting.id == d.lastSightingId
+        && sighting.step == d.sightingsCount && sighting.municipality == d.lastMunicipality
+        && rate.updatedAt == request.time && rate.lastOperationPublicBillId == id
+        && rate.lastOperationSightingId == d.lastSightingId;
+    }
+    function validBillCreate(id) {
+      let d = request.resource.data;
+      return billFields(d) && d.id == id && d.sightingsCount == 1 && d.totalDistanceKm == 0
+        && d.createdAt == d.updatedAt && d.firstSightedAt == d.createdAt && d.lastSightedAt == d.createdAt
+        && billOperation(id, d);
+    }
+    function validBillUpdate(id) {
+      let before = resource.data;
+      let d = request.resource.data;
+      return before.get('identityVersion', 1) == 2 && billFields(d) && d.id == id
+        && d.diff(before).affectedKeys().hasOnly(['updatedAt', 'sightingsCount', 'totalDistanceKm', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && d.sightingsCount == before.sightingsCount + 1 && d.totalDistanceKm >= before.totalDistanceKm
+        && request.time >= before.lastSightedAtServer + duration.value(15, 'm') && billOperation(id, d);
+    }
+    function validSighting(id) {
+      let d = request.resource.data;
+      let bill = getAfter(/databases/$(database)/documents/publicBills/$(d.publicBillId)).data;
+      let rate = getAfter(/databases/$(database)/documents/rateLimits/$(request.auth.uid)).data;
+      return d.keys().hasAll(['identityVersion', 'id', 'publicBillId', 'step', 'prefecture', 'municipality', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
+        && d.keys().hasOnly(['identityVersion', 'id', 'publicBillId', 'step', 'prefecture', 'municipality', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])
+        && d.identityVersion == 2 && d.id == id && opaque(d.publicBillId)
+        && d.step is int && d.step >= 1 && bill.identityVersion == 2
+        && bill.lastSightingId == id && bill.sightingsCount == d.step && bill.lastSightedAtServer == request.time
+        && rate.lastOperationSightingId == id && rate.lastOperationPublicBillId == d.publicBillId && rate.updatedAt == request.time
+        && d.prefecture is string && d.prefecture.size() >= 2 && d.prefecture.size() <= 10
+        && d.municipality is string && d.municipality.size() >= 1 && d.municipality.size() <= 50
+        && d.createdAt is string && d.createdAt.size() >= 19 && d.createdAt.size() <= 32
+        && d.distanceFromPrevKm is number && d.distanceFromPrevKm >= 0 && d.daysFromPrev is number && d.daysFromPrev >= 0
+        && (!('userNote' in d) || (d.userNote is string && d.userNote.size() <= 100 && !containsSerial(d.userNote)));
+    }
+    function validRateFields(d) {
+      return d.keys().hasAll(['shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount', 'updatedAt', 'lastOperationPublicBillId', 'lastOperationSightingId'])
+        && d.keys().hasOnly(['shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount', 'updatedAt', 'lastOperationPublicBillId', 'lastOperationSightingId'])
+        && d.shortWindowStartedAt is timestamp && d.shortCount is int && d.shortCount >= 1 && d.shortCount <= 10
+        && d.dailyWindowStartedAt is timestamp && d.dailyCount is int && d.dailyCount >= 1 && d.dailyCount <= 50
+        && d.updatedAt == request.time && opaque(d.lastOperationPublicBillId)
+        && d.lastOperationSightingId is string && d.lastOperationSightingId.size() >= 1 && d.lastOperationSightingId.size() <= 150;
+    }
+    function initialRate(d) {
+      return d.shortWindowStartedAt == request.time && d.shortCount == 1 && d.dailyWindowStartedAt == request.time && d.dailyCount == 1;
+    }
+    function advanceRate(before, d) {
+      return before.shortWindowStartedAt is timestamp && before.shortCount is int
+        && before.dailyWindowStartedAt is timestamp && before.dailyCount is int
+        && (request.time < before.shortWindowStartedAt + duration.value(10, 'm')
+          ? d.shortWindowStartedAt == before.shortWindowStartedAt && d.shortCount == before.shortCount + 1
+          : d.shortWindowStartedAt == request.time && d.shortCount == 1)
+        && (request.time < before.dailyWindowStartedAt + duration.value(24, 'h')
+          ? d.dailyWindowStartedAt == before.dailyWindowStartedAt && d.dailyCount == before.dailyCount + 1
+          : d.dailyWindowStartedAt == request.time && d.dailyCount == 1);
+    }
+    function validRateOperation(d) {
+      let config = get(/databases/$(database)/documents/appConfig/billRegistration).data;
+      let sightingPath = /databases/$(database)/documents/sightings/$(d.lastOperationSightingId);
+      let sighting = getAfter(sightingPath).data;
+      return config.mode == 'v2' && config.identityVersion == 2 && !exists(sightingPath)
+        && sighting.identityVersion == 2 && sighting.publicBillId == d.lastOperationPublicBillId
+        && sighting.id == d.lastOperationSightingId;
+    }
+    function trackedFields(d) {
+      return d.keys().hasAll(['identityVersion', 'series', 'serialColor', 'publicBillId', 'serialNumber', 'denomination', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
+        && d.keys().hasOnly(['identityVersion', 'series', 'serialColor', 'publicBillId', 'serialNumber', 'denomination', 'createdAt', 'firstRegisteredByMe', 'notifyOnRediscovery', 'lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality', 'legacyAcknowledgedBillId'])
+        && identity(d) && d.firstRegisteredByMe is bool && d.notifyOnRediscovery is bool
+        && (!('legacyAcknowledgedBillId' in d) || opaque(d.legacyAcknowledgedBillId));
+    }
+    function trackedOperation(id, d, bill, reverse) {
+      return trackedFields(d) && d.publicBillId == id && reverse.publicBillId == id
+        && reverse.identityKey == key(d) && sameIdentity(d, reverse) && sameVariant(d, bill)
+        && d.lastSeenSightingsCount == bill.sightingsCount && d.lastSeenAt == request.time
+        && d.lastSeenMunicipality == bill.lastMunicipality && bill.lastSightedAtServer == request.time;
+    }
+    function validTrackedCreate(id) {
+      let billPath = /databases/$(database)/documents/publicBills/$(id);
+      let existed = exists(billPath);
+      let bill = getAfter(billPath).data;
+      let reverse = getAfter(/databases/$(database)/documents/billIdentities/$(id)).data;
+      let d = request.resource.data;
+      return opaque(id) && d.createdAt == request.time && trackedOperation(id, d, bill, reverse)
+        && (existed ? (!d.firstRegisteredByMe && bill.sightingsCount == get(billPath).data.sightingsCount + 1) : d.firstRegisteredByMe);
+    }
+    function metadataUpdate(d, before, priorBill) {
+      return d.diff(before).affectedKeys().hasOnly(['lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality', 'notifyOnRediscovery'])
+        && (!('notifyOnRediscovery' in d) || d.notifyOnRediscovery is bool)
+        && (!('lastSeenSightingsCount' in d) || (d.lastSeenSightingsCount is int && d.lastSeenSightingsCount >= 0 && d.lastSeenSightingsCount <= priorBill.sightingsCount))
+        && (!('lastSeenAt' in d) || (d.lastSeenAt is timestamp && (!d.diff(before).affectedKeys().hasAny(['lastSeenAt']) || d.lastSeenAt == request.time)))
+        && (!('lastSeenMunicipality' in d) || (d.lastSeenMunicipality is string && d.lastSeenMunicipality.size() >= 1 && d.lastSeenMunicipality.size() <= 50));
+    }
+    function registrationTrackedUpdate(id, d, before, priorBill) {
+      let bill = getAfter(/databases/$(database)/documents/publicBills/$(id)).data;
+      let reverse = getAfter(/databases/$(database)/documents/billIdentities/$(id)).data;
+      return before.get('identityVersion', 1) == 2
+        && d.diff(before).affectedKeys().hasOnly(['lastSeenSightingsCount', 'lastSeenAt', 'lastSeenMunicipality'])
+        && bill.sightingsCount == priorBill.sightingsCount + 1 && trackedOperation(id, d, bill, reverse);
+    }
+    function validTrackedUpdate(id) {
+      let priorBill = get(/databases/$(database)/documents/publicBills/$(id)).data;
+      return resource.data.publicBillId == id
+        && (metadataUpdate(request.resource.data, resource.data, priorBill)
+          || registrationTrackedUpdate(id, request.resource.data, resource.data, priorBill));
+    }
+  }
+}

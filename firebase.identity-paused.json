@@ -1,0 +1,3 @@
+{
+  "firestore": { "rules": "firestore.identity-paused.rules" }
+}

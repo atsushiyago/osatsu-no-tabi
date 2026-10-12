@@ -30,42 +30,41 @@ import {
   formatSerialDisplay,
 } from '../utils/serial';
 import {
-  registerBillSighting,
   getBillBySerial,
-  RegistrationRateLimitError,
 } from '../services/billService';
 
-const BILL_COOLDOWN_MS = 15 * 60 * 1000;
+import { isIdentityV2Enabled, useFirebaseEmulators } from '../services/firebase';
+import { findExactBillIdentity, registerIdentityForUi } from '../services/billIdentityUiService';
+import { BillIdentityFields } from './BillIdentityFields';
+import { changeIdentityDesign, selectionIdentity } from '../utils/billIdentitySelection';
+import type { BillSeries, SerialColor } from '../data/banknoteVariants';
+
 const LazyCropModal = lazy(() => import('./CropModal').then(({ CropModal }) => ({ default: CropModal })));
 const LazyOcrDebugPanel = lazy(() => import('./OcrDebugPanel').then(({ OcrDebugPanel }) => ({ default: OcrDebugPanel })));
 type LocalizedMessage = { key: TranslationKey; values?: Record<string, string | number> } | { text: string; language: 'ja' | 'en' };
-
-function getTimestampMillis(value: BillWithSightings['lastSightedAtServer']): number | null {
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return value?.toMillis() ?? null;
-}
-
-function getCooldownRemainingMs(bill: BillWithSightings): number {
-  const lastSeenMs = getTimestampMillis(bill.lastSightedAtServer) ?? Date.parse(bill.lastSightedAt);
-  return Math.max(0, BILL_COOLDOWN_MS - (Date.now() - lastSeenMs));
-}
 
 interface RegisterViewProps {
   initialSerial?: string;
   onSuccess: (result: RegisterResult, trackingFailed?: boolean) => void;
   onCancel: () => void;
+  onViewBill?: (id: string) => void;
 }
 
 export const RegisterView = ({
   initialSerial = '',
   onSuccess,
   onCancel,
+  onViewBill,
 }: RegisterViewProps) => {
   const { language, t, number, yen } = useI18n();
   const [denomination, setDenomination] = useState<Denomination>(1000);
+  const [series, setSeries] = useState<BillSeries | null>(null);
+  const [serialColor, setSerialColor] = useState<SerialColor | null>(null);
+  const [identityLookupFailed, setIdentityLookupFailed] = useState(false);
+  const [lookupRetry, setLookupRetry] = useState(0);
+  const [legacyPrompt, setLegacyPrompt] = useState<{ id: string; signature: string } | null>(null);
+  const [recentIdentityId, setRecentIdentityId] = useState<string | null>(null);
+
   const {
     value: serialInput,
     setValue: setSerialInput,
@@ -262,42 +261,40 @@ export const RegisterView = ({
     }
   }, [selectedPref]);
 
-  // 記番号の入力に応じて既存紙幣が存在するか確認
+  const identitySelection = { denomination, series, serialColor };
+  const identityValidation = selectionIdentity(identitySelection, serialInput);
+  const identitySignature = JSON.stringify([denomination, series, serialColor, normalizeSerialNumber(serialInput)]);
   useEffect(() => {
-    const norm = normalizeSerialNumber(serialInput);
-
-    if (!validation?.isValid) {
-      setExistingBill(null);
-      return;
-    }
-
-    let isMounted = true;
+    let active = true;
+    setExistingBill(null);
+    setIdentityLookupFailed(false);
+    setLegacyPrompt(null);
+    setRecentIdentityId(null);
+    setIsCheckingExisting(false);
+    if (!validation?.isValid || isSerialComposing) return;
+    if (isIdentityV2Enabled && !identityValidation.isValid) return;
+    setIsCheckingExisting(true);
     const timer = setTimeout(async () => {
-      setIsCheckingExisting(true);
       try {
-        const found = await getBillBySerial(norm);
-        if (isMounted) {
-          if (found) {
-            setExistingBill(found);
-            setDenomination(found.denomination); // 既存の額面を自動反映
-          } else {
-            setExistingBill(null);
-          }
+        const found = isIdentityV2Enabled && identityValidation.isValid
+          ? await findExactBillIdentity(identityValidation.identity)
+          : await getBillBySerial(normalizeSerialNumber(serialInput));
+        if (active) {
+          setExistingBill(found);
+          if (found && !isIdentityV2Enabled) setDenomination(found.denomination);
         }
       } catch (err) {
-        console.warn('Failed to check existing bill:', err);
-      } finally {
-        if (isMounted) {
-          setIsCheckingExisting(false);
+        console.warn('Existing bill lookup failed:', (err as { code?: string }).code ?? 'unknown');
+        if (active && isIdentityV2Enabled) {
+          setIdentityLookupFailed(true);
+          setErrorKey((err as { code?: string }).code === 'emulator-unavailable' ? 'identityUnavailable' : 'billCheckFailed');
         }
-      }
+      } finally { if (active) setIsCheckingExisting(false); }
     }, 250);
-
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-    };
-  }, [serialInput, isSerialComposing, validation?.isValid]);
+    return () => { active = false; clearTimeout(timer); };
+    // All identity fields are in the signature; language changes require no reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serialInput, isSerialComposing, validation?.isValid, identitySignature, lookupRetry]);
 
   // GPS取得と市区町村代表座標への丸め込み
   const handleAutoLocate = () => {
@@ -332,11 +329,13 @@ export const RegisterView = ({
 
   const normSerial = normalizeSerialNumber(serialInput);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent, acknowledgedId?: string) => {
+    e?.preventDefault();
+    if (isSubmitting) return;
     setErrorMessage(null);
 
     if (isSerialComposing) return;
+    if (!isIdentityV2Enabled) { setErrorKey('identityPaused'); return; }
 
     // バリデーション
     const valResult = validateSerialNumber(serialInput, language);
@@ -350,52 +349,46 @@ export const RegisterView = ({
       return;
     }
 
-    const currentCityObj = availableCities.find((c) => c.city === selectedCity) || {
-      lat: 35.6895,
-      lng: 139.6917,
-    };
-
     setIsSubmitting(true);
 
-    let billForSubmit = existingBill;
     try {
-      if (billForSubmit && !getTimestampMillis(billForSubmit.lastSightedAtServer)) {
-        setErrorKey('billCheckFailed');
-        return;
-      }
-
-      if (billForSubmit) {
-        const remainingMs = getCooldownRemainingMs(billForSubmit);
-        if (remainingMs > 0) {
-          setErrorKey('cooldown', { minutes: number(Math.ceil(remainingMs / 60_000)) });
+      if (isIdentityV2Enabled) {
+        if (!identityValidation.isValid) {
+          setErrorKey(identityValidation.code === 'serial-series-mismatch' ? 'identityMismatch' : 'identityIncomplete');
           return;
         }
-      }
-
-      const targetDenomination = billForSubmit ? billForSubmit.denomination : denomination;
-      const result = await registerBillSighting({
-        denomination: targetDenomination,
-        serialNumber: normSerial,
-        prefecture: selectedPref,
-        municipality: selectedCity,
-        latitudeApprox: currentCityObj.lat,
-        longitudeApprox: currentCityObj.lng,
-        userNote,
-      });
-
-      onSuccess(result, false);
-    } catch (err: any) {
-      console.error('Registration failed:', err);
-      if (err instanceof RegistrationRateLimitError) {
-        setErrorKey(err.window === 'daily' ? 'dailyLimit' : 'tooManySubmissions');
+        if (identityLookupFailed) { setErrorKey('billCheckFailed'); return; }
+        const operation = await registerIdentityForUi({
+          ...identityValidation.identity, prefecture: selectedPref, municipality: selectedCity, userNote,
+          ...(acknowledgedId && legacyPrompt?.signature === identitySignature ? { legacyAcknowledgedBillId: acknowledgedId } : {}),
+        });
+        if (operation.status === 'legacy-ambiguous') {
+          setLegacyPrompt({ id: operation.legacyPublicBillId, signature: identitySignature });
+        } else if (operation.status === 'recently-recorded') {
+          setRecentIdentityId(operation.publicBillId);
+        } else { onSuccess(operation.result, false); }
         return;
       }
+    } catch (err: any) {
+      console.error('Registration failed:', err);
       const rawMsg = err?.message || '';
       const rawCode = typeof err?.code === 'string' ? err.code : '';
       const errorCode = rawCode.split('/').at(-1) ?? '';
       if (errorCode) console.error('Firebase registration error detail:', { code: rawCode, message: rawMsg });
 
-      if (errorCode === 'permission-denied') {
+      if (errorCode === 'emulator-unavailable' || errorCode === 'emulator-only') {
+        setErrorKey('identityUnavailable');
+      } else if (errorCode === 'invalid-connection') {
+        setErrorKey('identityConfigError');
+      } else if (errorCode === 'private-serial-note') {
+        setErrorKey('privateSerialNote');
+      } else if (errorCode === 'registration-paused') {
+        setErrorKey('identityPaused');
+      } else if (errorCode === 'registered-result-unavailable') {
+        setErrorKey('identitySavedUnreadable');
+      } else if (errorCode === 'short-rate-limit' || errorCode === 'daily-rate-limit') {
+        setErrorKey(errorCode === 'daily-rate-limit' ? 'dailyLimit' : 'tooManySubmissions');
+      } else if (errorCode === 'permission-denied') {
         setErrorKey('registrationDenied');
       } else if (errorCode === 'unauthenticated') {
         setErrorKey('authNotReady');
@@ -406,7 +399,8 @@ export const RegisterView = ({
       } else if (rawMsg.includes('Missing or insufficient permissions')) {
         setErrorKey('registrationDenied');
       } else {
-        setErrorMessage({ text: language === 'ja' && rawMsg ? rawMsg : t('registrationFailed'), language });
+        if (isIdentityV2Enabled) setErrorKey('registrationFailed');
+        else setErrorMessage({ text: language === 'ja' && rawMsg ? rawMsg : t('registrationFailed'), language });
       }
     } finally {
       setIsSubmitting(false);
@@ -424,15 +418,18 @@ export const RegisterView = ({
         </p>
       </div>
 
+      {useFirebaseEmulators && <p className="input-hint">{t('identityDev')}</p>}
+      {!isIdentityV2Enabled && <p role="status" className="identity-notice">{t('identityPaused')}</p>}
       <form onSubmit={handleSubmit} className="form-card">
+        <fieldset disabled={isSubmitting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         {/* 額面選択 */}
         <div className="form-group">
           <label className="form-label">
             <span>{t('denominationStep')}</span>
-            <span className="form-label-badge">{existingBill ? t('registered') : t('required')}</span>
+            <span className="form-label-badge">{existingBill && !isIdentityV2Enabled ? t('registered') : t('required')}</span>
           </label>
 
-          {existingBill ? (
+          {existingBill && !isIdentityV2Enabled ? (
             <div
               style={{
                 backgroundColor: '#eff6ff',
@@ -471,23 +468,30 @@ export const RegisterView = ({
             </div>
           ) : null}
 
-          <div className="denom-selector">
-            {([1000, 5000, 10000] as Denomination[]).map((val) => (
+          <div className="denom-selector" style={isIdentityV2Enabled ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined}>
+            {((isIdentityV2Enabled ? [1000, 2000, 5000, 10000] : [1000, 5000, 10000]) as Denomination[]).map((val) => (
               <button
                 type="button"
                 key={val}
-                disabled={Boolean(existingBill)}
+                disabled={Boolean(existingBill) && !isIdentityV2Enabled}
                 className={`denom-btn ${denomination === val ? 'active' : ''}`}
-                onClick={() => !existingBill && setDenomination(val)}
+                onClick={() => {
+                  if (existingBill && !isIdentityV2Enabled) return;
+                  setDenomination(val);
+                  if (isIdentityV2Enabled) {
+                    const next = changeIdentityDesign(val, null);
+                    setSeries(next.series); setSerialColor(next.serialColor);
+                  }
+                }}
                 id={`denom-${val}`}
                 style={{
-                  opacity: existingBill && denomination !== val ? 0.45 : 1,
-                  cursor: existingBill ? 'not-allowed' : 'pointer',
+                  opacity: existingBill && !isIdentityV2Enabled && denomination !== val ? 0.45 : 1,
+                  cursor: existingBill && !isIdentityV2Enabled ? 'not-allowed' : 'pointer',
                 }}
               >
                 <div className="denom-yen">{language === 'ja' ? `${number(val)}円` : yen(val)}</div>
                 <div className="denom-label">
-                  {t(val === 1000 ? 'denominationLabel1000' : val === 5000 ? 'denominationLabel5000' : 'denominationLabel10000')}
+                  {t(val === 1000 ? 'denominationLabel1000' : val === 2000 ? 'denominationLabel2000' : val === 5000 ? 'denominationLabel5000' : 'denominationLabel10000')}
                 </div>
               </button>
             ))}
@@ -765,6 +769,14 @@ export const RegisterView = ({
           </Suspense>
         )}
 
+        {isIdentityV2Enabled && <>
+          <BillIdentityFields selection={identitySelection} disabled={isSubmitting} onChange={(next) => {
+            setSeries(next.series); setSerialColor(next.serialColor); setErrorMessage(null);
+          }} />
+          {!identityValidation.isValid && identityValidation.code === 'serial-series-mismatch' && <p role="alert" className="identity-notice">{t('identityMismatch')}</p>}
+          {identityLookupFailed && <button type="button" className="btn-secondary" onClick={() => { setErrorMessage(null); setLookupRetry((value) => value + 1); }}>{t('retry')}</button>}
+        </>}
+
         {/* 現在地選択 */}
         <div className="form-group">
           <div className="form-label location-form-label">
@@ -881,11 +893,22 @@ export const RegisterView = ({
           </div>
         )}
 
+        {isIdentityV2Enabled && legacyPrompt?.signature === identitySignature && <section role="alertdialog" aria-labelledby="legacy-identity-title" aria-describedby="legacy-identity-text" className="identity-notice">
+          <h3 id="legacy-identity-title">{t('identityLegacyTitle')}</h3>
+          <p id="legacy-identity-text">{t('identityLegacyText')}</p>
+          <button type="button" className="btn-primary" id="identity-confirm-legacy" onClick={() => handleSubmit(undefined, legacyPrompt.id)}>{t('identityIndependent')}</button>
+          <button type="button" className="btn-secondary" onClick={() => setLegacyPrompt(null)}>{t('cancel')}</button>
+        </section>}
+        {isIdentityV2Enabled && recentIdentityId && <div className="identity-notice" role="status">
+          <p>{t('identityRecent')}</p>
+          <button type="button" className="btn-secondary" onClick={() => onViewBill?.(recentIdentityId)}>{t('identityView')}</button>
+        </div>}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
           <button
             type="submit"
             className="btn-primary"
-            disabled={isSubmitting || (Boolean(validation?.isValid) && isCheckingExisting)}
+            disabled={!isIdentityV2Enabled || isSubmitting || (Boolean(validation?.isValid) && isCheckingExisting) || (isIdentityV2Enabled && (!identityValidation.isValid || identityLookupFailed || Boolean(legacyPrompt) || Boolean(recentIdentityId)))}
             id="btn-submit-registration"
           >
             <span>{isSubmitting ? t('submitting') : t('submitRegistration')}</span>
@@ -899,6 +922,7 @@ export const RegisterView = ({
             {t('cancel')}
           </button>
         </div>
+        </fieldset>
       </form>
 
       {/* 記番号切り抜きモーダル */}

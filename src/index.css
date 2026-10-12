@@ -1056,3 +1056,20 @@ body, .app-container { background: var(--bg-main); }
   }
   .journey-map-title { white-space: nowrap; }
 }
+
+/* Identity v2 fields are shown only in the explicitly enabled demo emulator. */
+.identity-fields { margin: 20px 0; }
+.identity-fields fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+.identity-options { display: grid; gap: 8px; margin: 10px 0; }
+.identity-option { background: #fbf9f3; border: 1.5px solid #d8d1c4; border-radius: 5px; padding: 10px; color: #494b46; text-align: left; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.identity-options .identity-option { display: flex; flex-direction: column; gap: 4px; }
+.identity-option.active { border-color: #2d5446; background: #eef3ed; }
+.identity-colors { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.identity-colors .identity-option { display: inline-flex; gap: 6px; align-items: center; }
+.identity-swatch { display: inline-block; flex: 0 0 16px; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; vertical-align: middle; }
+.identity-notice { margin: 16px 0; padding: 14px; border: 1px solid #d8d1c4; background: #fbf9f3; border-radius: 5px; line-height: 1.65; overflow-wrap: anywhere; }
+.identity-notice h3 { font-size: 16px; margin-bottom: 8px; }
+.identity-notice button { margin-top: 10px; }
+.identity-candidates { display: grid; gap: 12px; }
+.identity-candidate { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 1px solid #d8d1c4; background: #fbf9f3; border-radius: 5px; overflow-wrap: anywhere; }
+.identity-candidate p { font-size: 13px; }
