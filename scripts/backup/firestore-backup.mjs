@@ -111,8 +111,9 @@ export async function capture(db, project) {
   if (json(first) !== json(second)) throw new Error('SOURCE_CHANGED_DURING_BACKUP');
   return { format: 'osatsu-firestore-backup', version: 1, project, database: '(default)', createdAt: new Date().toISOString(), consistency: 'two-equal-scans-not-a-snapshot', snapshot: first, manifest: manifest(first) };
 }
-export function validate(backup, db) {
-  if (!backup || backup.format !== 'osatsu-firestore-backup' || backup.version !== 1 || !/^demo-[a-z0-9-]+$/.test(backup.project) || backup.database !== '(default)' || !Array.isArray(backup.snapshot?.documents) || !Array.isArray(backup.snapshot?.collections)) fail();
+export function validate(backup, db, { expectedSource } = {}) {
+  const sourceAllowed = /^demo-[a-z0-9-]+$/.test(backup?.project ?? '') || (expectedSource === 'george-69c3a' && backup?.project === expectedSource);
+  if (!backup || backup.format !== 'osatsu-firestore-backup' || backup.version !== 1 || !sourceAllowed || backup.database !== '(default)' || !Array.isArray(backup.snapshot?.documents) || !Array.isArray(backup.snapshot?.collections)) fail();
   const paths = new Set();
   for (const col of backup.snapshot.collections) if (!pathValid(col, false)) fail();
   if (new Set(backup.snapshot.collections).size !== backup.snapshot.collections.length) fail();
@@ -120,12 +121,17 @@ export function validate(backup, db) {
     if (!pathValid(doc.path) || paths.has(doc.path) || sha(json(doc.data)) !== doc.sha256 || doc.data?.[0] !== 'map' || !backup.snapshot.collections.includes(doc.path.split('/').slice(0, -1).join('/'))) fail();
     paths.add(doc.path); decode(doc.data, db);
   }
-  if (json(manifest(backup.snapshot)) !== json(backup.manifest)) fail();
+  const calculated = manifest(backup.snapshot);
+  if (backup.sourceVersions !== undefined) {
+    if (!Array.isArray(backup.sourceVersions) || backup.sourceVersions.length !== paths.size || backup.sourceVersions.some((v, i) => v.path !== backup.snapshot.documents[i]?.path || typeof v.updateTime !== 'string')) fail();
+    calculated.versionsSha256 = sha(json(backup.sourceVersions));
+  }
+  if (json(calculated) !== json(backup.manifest)) fail();
 }
-export async function restore(db, project, backup) {
+export async function restore(db, project, backup, options = {}) {
   assertEmulator(project);
   if (db.projectId !== project) throw new Error('PROJECT_MISMATCH');
-  validate(backup, db);
+  validate(backup, db, options);
   const before = await scan(db);
   if (before.documents.length || before.collections.length) throw new Error('EMPTY_TARGET_REQUIRED');
   // create() rather than set(): concurrent/unexpected target data cannot be overwritten.
@@ -156,7 +162,7 @@ export function decrypt(text, password) {
   const key = scryptSync(password, salt, 32);
   try { const d = createDecipheriv('aes-256-gcm', key, iv); d.setAuthTag(tag); return JSON.parse(Buffer.concat([d.update(Buffer.from(e.ciphertext, 'base64')), d.final()]).toString('utf8')); } finally { key.fill(0); }
 }
-async function outsideRepo(path) {
+export async function outsideRepo(path) {
   const absolute = resolve(path); const parent = await realpath(resolve(absolute, '..'));
   const rel = relative(await realpath(root), parent);
   if (rel === '' || (!rel.startsWith('..' + '/') && rel !== '..' && !isAbsolute(rel))) throw new Error('STORE_OUTSIDE_REPOSITORY');
@@ -169,8 +175,10 @@ export async function saveEncrypted(path, backup, password) {
   if (json(decrypt(await readFile(target, 'utf8'), password)) !== json(backup)) throw new Error('SAVED_FILE_VERIFICATION_FAILED');
 }
 export async function main(args) {
-  if (args.length !== 4 || !['backup', 'restore', 'verify'].includes(args[0])) throw new Error('USAGE: backup|restore|verify demo-project output.osatsu-backup passphrase-file');
+  if (![4, 6].includes(args.length) || (args.length === 6 && (args[4] !== '--source-project' || args[5] !== 'george-69c3a')) || !['backup', 'restore', 'verify'].includes(args[0])) throw new Error('USAGE: backup|restore|verify demo-project output.osatsu-backup passphrase-file');
   const [command, project, file, keyFile] = args;
+  const options = { expectedSource: args[5] };
+  if (command === 'backup' && args.length !== 4) throw new Error('SOURCE_OPTION_RESTORE_VERIFY_ONLY');
   assertEmulator(project);
   const secretPath = await outsideRepo(keyFile); const s = await stat(secretPath);
   if (!s.isFile() || (s.mode & 0o077)) throw new Error('PASSPHRASE_FILE_MUST_BE_PRIVATE');
@@ -182,8 +190,8 @@ export async function main(args) {
       const backup = await capture(connection.db, project); await saveEncrypted(file, backup, password);
       console.info(`BACKUP_COMPLETE documents=${backup.manifest.count}`);
     } else {
-      const backup = decrypt(await readFile(await outsideRepo(file), 'utf8'), password); validate(backup, connection.db);
-      if (command === 'restore') { const result = await restore(connection.db, project, backup); console.info(`RESTORE_VERIFIED documents=${result.count}`); }
+      const backup = decrypt(await readFile(await outsideRepo(file), 'utf8'), password); validate(backup, connection.db, options);
+      if (command === 'restore') { const result = await restore(connection.db, project, backup, options); console.info(`RESTORE_VERIFIED documents=${result.count}`); }
       else console.info(`BACKUP_VALID documents=${backup.manifest.count}`);
     }
   } finally { password.fill(0); if (connection) await connection.close(); }

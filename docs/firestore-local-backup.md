@@ -1,3 +1,5 @@
+> 更新：本番読み取り専用コマンドと本番source→Emulator復元をローカル実装済み。現在の操作手順は [実行手順書](firestore-production-backup-runbook.md) を参照。以下の未実装記述は実装前の記録です。本番実行・実接続は未確認／未承認です。
+
 # Spark対応：ローカルFirestoreバックアップ（Emulator検証版）
 
 ## 現在の範囲

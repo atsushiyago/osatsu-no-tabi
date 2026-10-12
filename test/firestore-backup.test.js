@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -87,6 +88,18 @@ test('encrypted recursive round trip with mixed legacy/v2 and restored Rules bou
       assert.equal((await destination.db.doc('types/all').get()).get('maxInt'),9223372036854775807n);
       assert.equal((await destination.db.doc('types/all').get()).get('ref').firestore,destination.db);
       await assert.rejects(restore(destination.db,target,backup),/EMPTY_TARGET/);
+    });
+    await t.test('production source restored only into explicit empty demo target',async()=>{
+      const p='demo-osatsu-production-source-restore';await clearDemoProject(p);const c=await openEmulator(p);
+      const fromProduction={...structuredClone(backup),project:'george-69c3a'};
+      fromProduction.sourceVersions=fromProduction.snapshot.documents.map(d=>({path:d.path,updateTime:'2026-10-12T00:00:00Z'}));
+      fromProduction.manifest.versionsSha256=createHash('sha256').update(JSON.stringify(fromProduction.sourceVersions)).digest('hex');
+      try {
+        await assert.rejects(restore(c.db,p,fromProduction));
+        await assert.rejects(restore(c.db,'george-69c3a',fromProduction,{expectedSource:'george-69c3a'}));
+        await restore(c.db,p,fromProduction,{expectedSource:'george-69c3a'});
+        assert.deepEqual(await scan(c.db),backup.snapshot);
+      } finally {await c.close();}
     });
     await t.test('restored public histories, owner tracking and private reverse Rules',async()=>{
       await loadRules(await readFile(new URL('../firestore.strict.rules',import.meta.url),'utf8'),target);

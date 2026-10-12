@@ -20,7 +20,9 @@
     "test:appcheck": "node --test test/appcheck.test.js",
     "test:ocr": "node --test test/ocr-parser.test.js",
     "test:backup": "node test/run-backup-emulators.mjs",
-    "backup:emulator": "node scripts/backup/firestore-backup.mjs"
+    "backup:emulator": "node scripts/backup/firestore-backup.mjs",
+    "backup:production": "node scripts/backup/production-backup.mjs",
+    "test:backup:production": "node --test test/production-backup.test.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
