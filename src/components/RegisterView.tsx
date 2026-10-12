@@ -36,7 +36,7 @@ import {
 import { isIdentityV2Enabled, useFirebaseEmulators } from '../services/firebase';
 import { findExactBillIdentity, registerIdentityForUi } from '../services/billIdentityUiService';
 import { BillIdentityFields } from './BillIdentityFields';
-import { changeIdentityDesign, selectionIdentity } from '../utils/billIdentitySelection';
+import { changeIdentityDesign, registrationIdentityStage, identityInputSignature, selectionIdentity } from '../utils/billIdentitySelection';
 import type { BillSeries, SerialColor } from '../data/banknoteVariants';
 
 const LazyCropModal = lazy(() => import('./CropModal').then(({ CropModal }) => ({ default: CropModal })));
@@ -74,6 +74,8 @@ export const RegisterView = ({
     isComposing: isSerialComposing,
     validation,
   } = useSerialInput(initialSerial, language);
+  const [confirmedIdentitySerial, setConfirmedIdentitySerial] = useState<string | null>(null);
+  const [isSerialFocused, setIsSerialFocused] = useState(false);
   const [selectedPref, setSelectedPref] = useState('東京都');
   const [selectedCity, setSelectedCity] = useState('千代田区');
   const [userNote, setUserNote] = useState('');
@@ -261,9 +263,15 @@ export const RegisterView = ({
     }
   }, [selectedPref]);
 
-  const identitySelection = { denomination, series, serialColor };
+  const identityStage = registrationIdentityStage({ denomination, series, serialColor }, serialInput, confirmedIdentitySerial, isSerialFocused, isSerialComposing);
+  const identitySelection = identityStage.selection;
+  const currentInputSignature = identityInputSignature(denomination, serialInput);
+  const confirmIdentitySerial = () => {
+    if (!isSerialComposing && (identityStage.stage === 'confirm' || identityStage.stage === 'design' || identityStage.stage === 'color' || identityStage.stage === 'automatic')) setConfirmedIdentitySerial(currentInputSignature);
+    else setConfirmedIdentitySerial(null);
+  };
   const identityValidation = selectionIdentity(identitySelection, serialInput);
-  const identitySignature = JSON.stringify([denomination, series, serialColor, normalizeSerialNumber(serialInput)]);
+  const identitySignature = JSON.stringify([denomination, identitySelection.series, identitySelection.serialColor, normalizeSerialNumber(serialInput)]);
   useEffect(() => {
     let active = true;
     setExistingBill(null);
@@ -477,6 +485,7 @@ export const RegisterView = ({
                 className={`denom-btn ${denomination === val ? 'active' : ''}`}
                 onClick={() => {
                   if (existingBill && !isIdentityV2Enabled) return;
+                  setConfirmedIdentitySerial(current => current === currentInputSignature ? identityInputSignature(val, serialInput) : null);
                   setDenomination(val);
                   if (isIdentityV2Enabled) {
                     const next = changeIdentityDesign(val, null);
@@ -511,8 +520,11 @@ export const RegisterView = ({
             className="text-input code-font"
             placeholder={t('serialPlaceholder')}
             value={serialInput}
-            onChange={(e) => onSerialInputChange(e.target.value)}
-            onCompositionStart={onSerialCompositionStart}
+            onChange={(e) => { onSerialInputChange(e.target.value); setConfirmedIdentitySerial(null); setSeries(null); setSerialColor(null); }}
+            onFocus={() => setIsSerialFocused(true)}
+            onBlur={() => { setIsSerialFocused(false); if (isIdentityV2Enabled) confirmIdentitySerial(); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && isIdentityV2Enabled && !isSerialComposing && !e.nativeEvent.isComposing) { e.preventDefault(); confirmIdentitySerial(); e.currentTarget.blur(); } }}
+            onCompositionStart={() => { onSerialCompositionStart(); setConfirmedIdentitySerial(null); setSeries(null); setSerialColor(null); }}
             onCompositionEnd={(e) => onSerialCompositionEnd(e.currentTarget.value)}
             maxLength={12}
             inputMode="text"
@@ -770,9 +782,13 @@ export const RegisterView = ({
         )}
 
         {isIdentityV2Enabled && <>
-          <BillIdentityFields selection={identitySelection} disabled={isSubmitting} onChange={(next) => {
+          {(identityStage.stage === 'input' || identityStage.stage === 'confirm') && <div className="identity-confirmation" role="status">
+            <p className="input-hint">{t(identityStage.stage === 'input' ? 'identityInputFirst' : 'identityConfirmHelp')}</p>
+            {identityStage.stage === 'confirm' && <button type="button" id="identity-confirm-input" className="btn-secondary" disabled={isSubmitting} onClick={() => { setIsSerialFocused(false); confirmIdentitySerial(); }}>{t('identityConfirmSerial')}</button>}
+          </div>}
+          {identityStage.stage !== 'input' && identityStage.stage !== 'confirm' && <BillIdentityFields selection={identitySelection} disabled={isSubmitting} onChange={(next) => {
             setSeries(next.series); setSerialColor(next.serialColor); setErrorMessage(null);
-          }} />
+          }} />}
           {!identityValidation.isValid && identityValidation.code === 'serial-series-mismatch' && <p role="alert" className="identity-notice">{t('identityMismatch')}</p>}
           {identityLookupFailed && <button type="button" className="btn-secondary" onClick={() => { setErrorMessage(null); setLookupRetry((value) => value + 1); }}>{t('retry')}</button>}
         </>}
@@ -858,7 +874,6 @@ export const RegisterView = ({
         <div className="form-group">
           <label className="form-label" htmlFor="userNote">
             <span>{t('memoStep')}</span>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{t('optional')}</span>
           </label>
           <input
             id="userNote"

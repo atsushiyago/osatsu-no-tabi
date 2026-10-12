@@ -65,7 +65,8 @@ async function registration(page, data) {
   await page.goto(`${url}/#/register`);
   await page.locator(`#denom-${data.denomination}`).click();
   await page.locator('#serialInput').fill(data.serialNumber);
-  if (data.denomination !== 2000) await page.locator(`#identity-design-${data.series}`).click();
+  await page.locator('#serialInput').blur();
+  if (data.denomination !== 2000 && data.series !== 'F') await page.locator(`#identity-design-${data.series}`).click();
   if (data.series !== 'F' && data.denomination !== 2000) await page.locator(`#identity-color-${data.serialColor}`).click();
   await page.locator('#btn-submit-registration').waitFor();
   await assertEnabled(page.locator('#btn-submit-registration'));
@@ -94,7 +95,8 @@ try {
     await check(page, `${name}-F`);
     await page.locator('#serialInput').fill('QA654321B');
     assert.equal(await page.locator('#btn-submit-registration').isDisabled(), true);
-    await page.locator('[role="alert"]').filter({ hasText: language === 'ja' ? '形式が一致' : 'do not match' }).waitFor();
+    assert.equal(await page.locator('.identity-auto-design').count(), 0);
+    await page.locator('#identity-design-E').waitFor();
     await check(page, `${name}-mismatch`);
     await registration(page, identity('D', 'black', 2000));
     assert.equal(await page.locator('.identity-colors button').count(), 0);
@@ -222,7 +224,8 @@ try {
   await check(offline.page, 'en-390-offline-search');
   await offline.page.goto(`${url}/#/register`);
   await offline.page.locator('#serialInput').fill('QA654324BB');
-  await offline.page.locator('#identity-design-F').click();
+  await offline.page.locator('#serialInput').blur();
+  assert.equal(await offline.page.locator('#identity-design-F').count(), 0);
   await offline.page.getByText('The test emulators are unavailable.', { exact: false }).waitFor();
   assert.equal(await offline.page.locator('#btn-submit-registration').isDisabled(), true);
   assert.equal(await adminGet('billIdentityIndex/v2_JPY_1000_F_black_QA654324BB'), null);

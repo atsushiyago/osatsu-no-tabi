@@ -30,8 +30,9 @@ try {
     assert.equal(await page.locator('#serialInput').inputValue(), '', 'OCR must not auto-confirm identity');
     await candidate.click();
     assert.equal(await page.locator('#serialInput').inputValue(), 'QA234111BB');
-    assert.equal(await page.locator('#btn-submit-registration').isDisabled(), true, 'design must remain unknown');
-    await page.locator('#identity-design-F').click();
+    assert.equal(await page.locator('#identity-design-F').count(), 0, 'complete selected F serial requires no design choice');
+    await page.locator('#identity-confirm-input').click();
+    await page.locator('.identity-auto-design').waitFor();
     await page.waitForFunction(() => !document.getElementById('btn-submit-registration').disabled);
     const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     records.push({ language, width, candidateInput: 'passed', debugDocumentWidth: documentWidth, recognition: 'stubbed' });

@@ -795,6 +795,12 @@ body {
   text-transform: uppercase;
 }
 
+#serialInput::placeholder {
+  color: #788089;
+  opacity: 1;
+  font-weight: 400;
+}
+
 .input-hint {
   font-size: 12px;
   color: #64748b;
@@ -1073,3 +1079,10 @@ body, .app-container { background: var(--bg-main); }
 .identity-candidates { display: grid; gap: 12px; }
 .identity-candidate { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 1px solid #d8d1c4; background: #fbf9f3; border-radius: 5px; overflow-wrap: anywhere; }
 .identity-candidate p { font-size: 13px; }
+
+/* Banknote design examples remain readable even at 320px. */
+.identity-options .identity-option > span,
+.identity-auto-design > span { font-size: 1rem; line-height: 1.65; }
+.identity-options .identity-option > strong,
+.identity-auto-design > strong { font-size: 1.05rem; line-height: 1.5; }
+.identity-auto-design { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }

@@ -24,7 +24,8 @@
     "backup:production": "node scripts/backup/production-backup.mjs",
     "test:backup:production": "node --test test/production-backup.test.js",
     "backup:budget": "node scripts/backup/check-budget.mjs",
-    "test:backup:budget": "node --test test/read-budget.test.js"
+    "test:backup:budget": "node --test test/read-budget.test.js",
+    "dev:identity:lan": "node scripts/dev/identity-lan.mjs"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

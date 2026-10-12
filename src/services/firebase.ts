@@ -10,9 +10,10 @@ import { connectAuthEmulator, getAuth, signInAnonymously, onAuthStateChanged, ty
 import { isDebugTiming } from '../utils/debug';
 import { getOrCreateAnonymousUser } from './anonymousSession.js';
 
-import { identityV2Enabled, identityEmulatorEnabled, IDENTITY_EMULATOR_PROJECT, IDENTITY_FIRESTORE_PORT, IDENTITY_AUTH_PORT } from '../utils/identityEnvironment';
+import { identityEmulatorEndpoint, identityV2Enabled, identityEmulatorEnabled, IDENTITY_EMULATOR_PROJECT } from '../utils/identityEnvironment';
 
 export const useFirebaseEmulators = import.meta.env.DEV && identityEmulatorEnabled(true, import.meta.env.VITE_USE_FIREBASE_EMULATORS);
+export const emulatorEndpoint = identityEmulatorEndpoint(import.meta.env.DEV, import.meta.env.VITE_USE_FIREBASE_EMULATORS, import.meta.env.DEV ? import.meta.env.VITE_IDENTITY_LAN_HOST : undefined);
 export const isIdentityV2Enabled = identityV2Enabled(import.meta.env.VITE_BILL_IDENTITY_V2);
 const firebaseConfig = useFirebaseEmulators ? {
   apiKey: 'fake-api-key', projectId: IDENTITY_EMULATOR_PROJECT,
@@ -109,7 +110,7 @@ if (isFirebaseConfigured) {
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
     });
-    if (useFirebaseEmulators) connectFirestoreEmulator(db, '127.0.0.1', IDENTITY_FIRESTORE_PORT);
+    if (useFirebaseEmulators) connectFirestoreEmulator(db, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
     console.info('Firebase Firestore initialized with experimentalForceLongPolling: true');
   } catch (err) {
     console.error('Failed to initialize Firebase:', err);
@@ -130,8 +131,9 @@ if (isFirebaseConfigured) {
 if (app) {
   try {
     auth = getAuth(app);
-    if (useFirebaseEmulators) connectAuthEmulator(auth, `http://127.0.0.1:${IDENTITY_AUTH_PORT}`, { disableWarnings: true });
+    if (useFirebaseEmulators) connectAuthEmulator(auth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
   } catch (err) {
+    if (useFirebaseEmulators) auth = null; // Never retain an unconnected demo Auth instance.
     console.warn('Firebase Auth is unavailable; device bill list is disabled:', err);
   }
 }

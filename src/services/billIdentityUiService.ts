@@ -1,16 +1,16 @@
 import { doc, getDocFromServer } from 'firebase/firestore';
-import { auth, db, ensureAnonymousUser, isIdentityV2Enabled, useFirebaseEmulators } from './firebase';
+import { auth, db, ensureAnonymousUser, isIdentityV2Enabled, useFirebaseEmulators, emulatorEndpoint } from './firebase';
 import { createBillIdentityKey, type BillIdentity } from '../utils/billIdentity';
 import { readIdentityCandidates } from '../utils/identitySearch';
 import { IdentityRegistrationError, registerBillIdentityV2, type IdentityRegistrationInput } from './billIdentityRegistry';
 import { getPublicBillById } from './billService';
 import type { Bill, RegisterResult } from '../types';
-import { IDENTITY_EMULATOR_PROJECT, IDENTITY_FIRESTORE_PORT, IDENTITY_AUTH_PORT, validIdentityConnection } from '../utils/identityEnvironment';
+import { IDENTITY_EMULATOR_PROJECT, validIdentityConnection } from '../utils/identityEnvironment';
 
 function identityContext() {
   if (!isIdentityV2Enabled) throw new IdentityRegistrationError('registration-paused');
   if (!db || !auth || !validIdentityConnection(useFirebaseEmulators, db.app.options.projectId,
-    auth.app.options.projectId, auth.emulatorConfig?.host)) {
+    auth.app.options.projectId, auth.emulatorConfig?.host, emulatorEndpoint.host)) {
     throw new IdentityRegistrationError('invalid-connection');
   }
   return { db, auth };
@@ -22,8 +22,8 @@ export async function assertIdentityReady() {
     // No production URLs or keys are used by emulator probes. Missing registration
     // config must not prevent read-only searches; the transaction rejects writes.
     const paths = [
-      `http://127.0.0.1:${IDENTITY_AUTH_PORT}/emulator/v1/projects/${IDENTITY_EMULATOR_PROJECT}/config`,
-      `http://127.0.0.1:${IDENTITY_FIRESTORE_PORT}/v1/projects/${IDENTITY_EMULATOR_PROJECT}/databases/(default)/documents/appConfig/billRegistration`,
+      `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}/emulator/v1/projects/${IDENTITY_EMULATOR_PROJECT}/config`,
+      `http://${emulatorEndpoint.host}:${emulatorEndpoint.firestorePort}/v1/projects/${IDENTITY_EMULATOR_PROJECT}/databases/(default)/documents/appConfig/billRegistration`,
     ];
     try {
       const [authResponse, firestoreResponse] = await Promise.all(paths.map((url) => fetch(url, { signal: AbortSignal.timeout(3000), cache: 'no-store' })));
