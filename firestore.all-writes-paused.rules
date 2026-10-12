@@ -1,0 +1,433 @@
+// Backup freeze: derived from reviewed production v1; all client writes denied.
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // 日本円紙幣追跡「お札の旅」 Firestore Security Rules (MVP本番用)
+    // ===============================================================
+
+    // ---------------------------------------------------------------
+    // 1. bills コレクション (紙幣メタデータ)
+    // ---------------------------------------------------------------
+    // Retired collection: old schema must not remain a public read path.
+    match /bills/{billId} { allow read: if false;
+      allow write: if false; }
+
+    match /serialIndex/{serial} {
+      // Exact document lookup only. Firestore Rules do not permit list/query.
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    match /publicBills/{publicBillId} {
+      allow get, list: if true;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /sightings/{sightingId} {
+      // Excludes any pre-reset documents that still have the former serial-valued billId.
+      // Constrained publicBillId queries are allowed; unfiltered legacy scans are not.
+      allow get, list: if resource.data.keys().hasAll(['publicBillId'])
+        && isOpaquePublicBillId(resource.data.publicBillId);
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    function isOpaquePublicBillId(value) {
+      return value.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
+
+    // Bank of Japan formats: old notes use 1-2 prefix letters and 1 suffix;
+    // notes issued from 2024 use 2 prefix and 2 suffix letters. I/O are excluded.
+    // The numeric alternatives cover exactly 000001 through 900000.
+    function isValidSerial(value) {
+      return value is string && (
+        value.matches('^[A-HJ-NP-Z]{1,2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]$')
+        || value.matches('^[A-HJ-NP-Z]{2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]{2}$')
+      );
+    }
+
+    function containsValidSerial(value) {
+      return value.matches('.*[A-HJ-NP-Z]{1,2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z].*')
+        || value.matches('.*[A-HJ-NP-Z]{2}(00000[1-9]|0000[1-9][0-9]|000[1-9][0-9]{2}|00[1-9][0-9]{3}|0[1-9][0-9]{4}|[1-8][0-9]{5}|900000)[A-HJ-NP-Z]{2}.*');
+    }
+
+    function isValidPublicBillCreate(publicBillId) {
+      let data = request.resource.data;
+      let trackedPath = /databases/$(database)/documents/users/$(request.auth.uid)/trackedBills/$(publicBillId);
+      let trackedAfter = getAfter(trackedPath).data;
+      let indexPath = /databases/$(database)/documents/serialIndex/$(trackedAfter.serialNumber);
+      return data.keys().hasAll(['id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && data.keys().hasOnly(['id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && data.id == publicBillId
+        && data.denomination in [1000, 5000, 10000]
+        && data.sightingsCount == 1 && data.totalDistanceKm == 0
+        && data.createdAt is string && data.updatedAt is string
+        && data.firstSightedAt is string && data.lastSightedAt is string
+        && data.lastMunicipality is string && data.lastMunicipality.size() >= 1 && data.lastMunicipality.size() <= 50
+        && data.lastSightingId is string && data.lastSightingId.size() >= 1 && data.lastSightingId.size() <= 150
+        && data.lastSightedAtServer is timestamp && data.lastSightedAtServer == request.time
+        && existsAfter(trackedPath) && trackedAfter.publicBillId == publicBillId
+        && existsAfter(indexPath) && getAfter(indexPath).data.publicBillId == publicBillId;
+    }
+
+    function isValidPublicBillUpdate() {
+      let current = resource.data;
+      let next = request.resource.data;
+      return next.keys().hasAll(['id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && next.keys().hasOnly(['id', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer', 'lastMunicipality', 'lastSightingId'])
+        && next.id == current.id && next.denomination == current.denomination
+        && next.createdAt == current.createdAt && next.firstSightedAt == current.firstSightedAt
+        && next.sightingsCount == current.sightingsCount + 1
+        && next.totalDistanceKm is number && next.totalDistanceKm >= current.totalDistanceKm
+        && next.updatedAt is string && next.lastSightedAt is string
+        && next.lastMunicipality is string && next.lastMunicipality.size() >= 1 && next.lastMunicipality.size() <= 50
+        && next.lastSightingId is string && next.lastSightingId.size() >= 1 && next.lastSightingId.size() <= 150
+        && current.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer is timestamp && next.lastSightedAtServer == request.time
+        && request.time >= current.lastSightedAtServer + duration.value(15, 'm');
+    }
+
+    function isValidPublicSighting(sightingId) {
+      let data = request.resource.data;
+      let billPath = /databases/$(database)/documents/publicBills/$(data.publicBillId);
+      let billAfter = getAfter(billPath).data;
+      return data.keys().hasAll(['id', 'publicBillId', 'step', 'prefecture', 'municipality', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
+        && data.keys().hasOnly(['id', 'publicBillId', 'step', 'prefecture', 'municipality', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])
+        && data.id == sightingId && isOpaquePublicBillId(data.publicBillId)
+        && existsAfter(billPath)
+        && data.step is int && data.step == billAfter.sightingsCount
+        && billAfter.lastSightedAtServer == request.time
+        && ((!exists(billPath) && data.step == 1)
+          || (exists(billPath) && data.step == get(billPath).data.sightingsCount + 1))
+        && data.prefecture is string && data.prefecture.size() >= 2 && data.prefecture.size() <= 10
+        && data.municipality is string && data.municipality.size() >= 1 && data.municipality.size() <= 50
+        && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
+        && data.distanceFromPrevKm is number && data.distanceFromPrevKm >= 0
+        && data.daysFromPrev is number && data.daysFromPrev >= 0
+        && (!('userNote' in data) || (data.userNote is string && data.userNote.size() <= 100
+          && !containsValidSerial(data.userNote)));
+    }
+
+    function hasNewSchemaOperation(publicBillId) {
+      let ratePath = /databases/$(database)/documents/rateLimits/$(request.auth.uid);
+      let rateAfter = getAfter(ratePath).data;
+      return existsAfter(ratePath)
+        && rateAfter.lastOperationPublicBillId == publicBillId
+        && isValidNewRateLimitTransition(request.auth.uid)
+        && hasNewOperationPair(publicBillId, rateAfter.lastOperationSightingId)
+        && hasSerialProof(publicBillId);
+    }
+
+    // The owner's private tracked bill is the proof that this client supplied
+    // the complete serial. serialIndex is exact-get-only; it is never listable.
+    // This reduces publicBillId-only forgery but does not prevent serial guessing.
+    function hasSerialProof(publicBillId) {
+      let trackedPath = /databases/$(database)/documents/users/$(request.auth.uid)/trackedBills/$(publicBillId);
+      let trackedAfter = getAfter(trackedPath).data;
+      let serialPath = /databases/$(database)/documents/serialIndex/$(trackedAfter.serialNumber);
+      return existsAfter(trackedPath)
+        && trackedAfter.publicBillId == publicBillId
+        && trackedAfter.serialNumber is string
+        && isValidSerial(trackedAfter.serialNumber)
+        && existsAfter(serialPath)
+        && getAfter(serialPath).data.publicBillId == publicBillId;
+    }
+
+    function hasNewOperationPair(publicBillId, sightingId) {
+      let billPath = /databases/$(database)/documents/publicBills/$(publicBillId);
+      let sightingPath = /databases/$(database)/documents/sightings/$(sightingId);
+      let billAfter = getAfter(billPath).data;
+      let sightingAfter = getAfter(sightingPath).data;
+      return existsAfter(billPath) && existsAfter(sightingPath) && !exists(sightingPath)
+        && sightingAfter.publicBillId == publicBillId
+        && sightingAfter.id == sightingId
+        && billAfter.lastSightingId == sightingId
+        && billAfter.lastMunicipality == sightingAfter.municipality
+        && billAfter.sightingsCount == sightingAfter.step
+        && ((!exists(billPath) && sightingAfter.step == 1)
+          || (exists(billPath) && sightingAfter.step == get(billPath).data.sightingsCount + 1));
+    }
+
+    function isValidNewRateFields(data) {
+      return data.keys().hasAll(['shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount', 'updatedAt', 'lastOperationPublicBillId', 'lastOperationSightingId'])
+        && data.keys().hasOnly(['shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount', 'updatedAt', 'lastOperationPublicBillId', 'lastOperationSightingId'])
+        && data.shortWindowStartedAt is timestamp && data.shortCount is int && data.shortCount >= 1 && data.shortCount <= 10
+        && data.dailyWindowStartedAt is timestamp && data.dailyCount is int && data.dailyCount >= 1 && data.dailyCount <= 50
+        && data.updatedAt is timestamp && data.updatedAt == request.time
+        && isOpaquePublicBillId(data.lastOperationPublicBillId)
+        && data.lastOperationSightingId is string && data.lastOperationSightingId.size() >= 1 && data.lastOperationSightingId.size() <= 150;
+    }
+
+    function isValidNewRateLimitTransition(uid) {
+      let path = /databases/$(database)/documents/rateLimits/$(uid);
+      let next = getAfter(path).data;
+      return existsAfter(path) && isValidNewRateFields(next)
+        && (!exists(path)
+          ? (next.shortWindowStartedAt == request.time && next.shortCount == 1 && next.dailyWindowStartedAt == request.time && next.dailyCount == 1)
+          : isValidNewRateAdvance(get(path).data, next));
+    }
+
+    function isValidNewRateAdvance(before, after) {
+      return isValidNewRateFields(after)
+        && before.shortWindowStartedAt is timestamp && before.shortCount is int && before.shortCount >= 1 && before.shortCount <= 10
+        && before.dailyWindowStartedAt is timestamp && before.dailyCount is int && before.dailyCount >= 1 && before.dailyCount <= 50
+        && after.diff(before).affectedKeys().hasOnly(['shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount', 'updatedAt', 'lastOperationPublicBillId', 'lastOperationSightingId'])
+        && (request.time < before.shortWindowStartedAt + duration.value(10, 'm')
+          ? (after.shortWindowStartedAt == before.shortWindowStartedAt && after.shortCount == before.shortCount + 1)
+          : (after.shortWindowStartedAt == request.time && after.shortCount == 1))
+        && (request.time < before.dailyWindowStartedAt + duration.value(24, 'h')
+          ? (after.dailyWindowStartedAt == before.dailyWindowStartedAt && after.dailyCount == before.dailyCount + 1)
+          : (after.dailyWindowStartedAt == request.time && after.dailyCount == 1));
+    }
+
+    function isValidNewBill(billId) {
+      let data = request.resource.data;
+
+      return request.resource.id == billId
+        // ドキュメントIDと記番号の一致および日本銀行券の正規化形式検証
+        && data.id == billId
+        && data.serialNumber == billId
+        && isValidSerial(data.serialNumber)
+
+        // 額面は 1000円 / 5000円 / 10000円 のいずれか
+        && data.denomination in [1000, 5000, 10000]
+
+        // 初回登録時の初期値
+        && data.sightingsCount == 1
+        && data.totalDistanceKm == 0
+
+        // 日時フィールド（ISO8601文字列）の検証
+        && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
+        && data.updatedAt is string && data.updatedAt.size() >= 19 && data.updatedAt.size() <= 32
+        && data.firstSightedAt is string && data.firstSightedAt.size() >= 19 && data.firstSightedAt.size() <= 32
+        && data.lastSightedAt is string && data.lastSightedAt.size() >= 19 && data.lastSightedAt.size() <= 32
+        // This field is assigned by serverTimestamp(); clients cannot choose its value.
+        && data.lastSightedAtServer is timestamp && data.lastSightedAtServer == request.time
+
+        // 未知フィールドの混入防止（必要な全9フィールドのみ許可）
+        && data.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
+        && data.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
+    }
+
+    function isValidBillUpdate() {
+      let current = resource.data;
+      let next = request.resource.data;
+
+      let immutableFields =
+        // 改ざんを禁止する不変フィールド
+        next.id == current.id
+        && next.serialNumber == current.serialNumber
+        && next.denomination == current.denomination
+        && next.createdAt == current.createdAt
+        && next.firstSightedAt == current.firstSightedAt;
+
+      let validRediscovery =
+        // 発見回数は現在値 + 1 のみ許可（ジャンプや減少を防止）
+        next.sightingsCount == current.sightingsCount + 1
+
+        // 移動距離は減少不可かつ非負数
+        && next.totalDistanceKm is number
+        && next.totalDistanceKm >= current.totalDistanceKm
+
+        // 更新日時フィールドの検証
+        && next.updatedAt is string && next.updatedAt.size() >= 19 && next.updatedAt.size() <= 32
+        && next.lastSightedAt is string && next.lastSightedAt.size() >= 19 && next.lastSightedAt.size() <= 32
+        && current.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer == request.time
+        && request.time >= current.lastSightedAtServer + duration.value(15, 'm')
+
+        // 未知フィールドの追加防止
+        && next.keys().hasAll(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer'])
+        && next.keys().hasOnly(['id', 'serialNumber', 'denomination', 'createdAt', 'updatedAt', 'sightingsCount', 'totalDistanceKm', 'firstSightedAt', 'lastSightedAt', 'lastSightedAtServer']);
+
+      let initializeLegacyCooldown =
+        !('lastSightedAtServer' in current)
+        && next.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer == request.time
+        && next.diff(current).affectedKeys().hasOnly(['lastSightedAtServer']);
+
+      return immutableFields && (validRediscovery || initializeLegacyCooldown);
+    }
+
+    function isCooldownClockInitialization() {
+      let current = resource.data;
+      let next = request.resource.data;
+      return !('lastSightedAtServer' in current)
+        && 'lastSightedAtServer' in next
+        && next.lastSightedAtServer is timestamp
+        && next.lastSightedAtServer == request.time
+        && next.diff(current).affectedKeys().hasOnly(['lastSightedAtServer']);
+    }
+
+    // ---------------------------------------------------------------
+    // 2. sightings コレクション (発見記録)
+    // ---------------------------------------------------------------
+    // Retired sighting schema: all public history uses publicBillId in the match above.
+    match /sightings/{sightingId} { allow read: if false;
+      allow write: if false; }
+
+    function isValidNewSighting() {
+      let data = request.resource.data;
+      let targetBillDoc = getAfter(/databases/$(database)/documents/bills/$(data.billId));
+      let billPath = /databases/$(database)/documents/bills/$(data.billId);
+
+      return (
+        // トランザクションコミット後に対応する bills/{billId} が存在すること
+        existsAfter(/databases/$(database)/documents/bills/$(data.billId))
+
+        // トランザクション整合性: sightingのstepとbillのsightingsCountが完全に連動していること
+        && data.step == targetBillDoc.data.sightingsCount
+        && targetBillDoc.data.lastSightedAtServer == request.time
+        && ((!exists(billPath) && data.step == 1)
+          || (exists(billPath) && data.step == get(billPath).data.sightingsCount + 1))
+
+        // 基本フィールド型とフォーマット
+        && data.id is string
+        && isValidSerial(data.billId)
+        && data.step is int && data.step >= 1
+
+        // 地域（市区町村レベル）
+        && data.prefecture is string && data.prefecture.size() >= 2 && data.prefecture.size() <= 10
+        && data.municipality is string && data.municipality.size() >= 1 && data.municipality.size() <= 50
+
+        // 概算座標範囲（世界標準範囲）
+        && data.latitudeApprox is number && data.latitudeApprox >= -90.0 && data.latitudeApprox <= 90.0
+        && data.longitudeApprox is number && data.longitudeApprox >= -180.0 && data.longitudeApprox <= 180.0
+
+        // 移動・経過メトリクス（非負数）
+        && data.distanceFromPrevKm is number && data.distanceFromPrevKm >= 0
+        && data.daysFromPrev is number && data.daysFromPrev >= 0
+
+        // 日時文字列（ISO8601）
+        && data.createdAt is string && data.createdAt.size() >= 19 && data.createdAt.size() <= 32
+
+        // 旅メモ（任意入力・最大100文字）
+        && (!('userNote' in data) || (data.userNote is string && data.userNote.size() <= 100))
+
+        // フィールドキーの完全一致
+        && data.keys().hasAll(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev'])
+        && data.keys().hasOnly(['id', 'billId', 'step', 'prefecture', 'municipality', 'latitudeApprox', 'longitudeApprox', 'createdAt', 'distanceFromPrevKm', 'daysFromPrev', 'userNote'])
+      );
+    }
+
+    // A single rate-limit update authorizes exactly one public bill+sighting operation.
+    // The operation IDs in the private rate doc prevent batching multiple bills under
+    // one counter increment. The Rules on both public documents require this same update.
+    function hasRateLimitFields(data) {
+      return data.keys().hasAll([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && data.keys().hasOnly([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && data.shortWindowStartedAt is timestamp
+        && data.shortCount is int && data.shortCount >= 1 && data.shortCount <= 10
+        && data.dailyWindowStartedAt is timestamp
+        && data.dailyCount is int && data.dailyCount >= 1 && data.dailyCount <= 50
+        && data.updatedAt is timestamp && data.updatedAt == request.time
+        && data.lastOperationBillId is string
+        && isValidSerial(data.lastOperationBillId)
+        && data.lastOperationSightingId is string
+        && data.lastOperationSightingId.size() >= 1
+        && data.lastOperationSightingId.size() <= 150;
+    }
+
+    function isInitialRateLimit(data) {
+      return hasRateLimitFields(data)
+        && data.shortWindowStartedAt == request.time
+        && data.shortCount == 1
+        && data.dailyWindowStartedAt == request.time
+        && data.dailyCount == 1;
+    }
+
+    function isValidRateLimitAdvance(before, after) {
+      return hasRateLimitFields(after)
+        && before.shortWindowStartedAt is timestamp
+        && before.shortCount is int && before.shortCount >= 1 && before.shortCount <= 10
+        && before.dailyWindowStartedAt is timestamp
+        && before.dailyCount is int && before.dailyCount >= 1 && before.dailyCount <= 50
+        && after.diff(before).affectedKeys().hasOnly([
+          'shortWindowStartedAt', 'shortCount', 'dailyWindowStartedAt', 'dailyCount',
+          'updatedAt', 'lastOperationBillId', 'lastOperationSightingId'
+        ])
+        && (request.time < before.shortWindowStartedAt + duration.value(10, 'm')
+          ? (after.shortWindowStartedAt == before.shortWindowStartedAt
+            && after.shortCount == before.shortCount + 1)
+          : (after.shortWindowStartedAt == request.time && after.shortCount == 1))
+        && (request.time < before.dailyWindowStartedAt + duration.value(24, 'h')
+          ? (after.dailyWindowStartedAt == before.dailyWindowStartedAt
+            && after.dailyCount == before.dailyCount + 1)
+          : (after.dailyWindowStartedAt == request.time && after.dailyCount == 1));
+    }
+
+    function isValidRateLimitTransition(uid) {
+      let path = /databases/$(database)/documents/rateLimits/$(uid);
+      return existsAfter(path)
+        && (!exists(path)
+          ? isInitialRateLimit(getAfter(path).data)
+          : isValidRateLimitAdvance(get(path).data, getAfter(path).data));
+    }
+
+    function hasValidRateLimitOperationPair(data) {
+      let billPath = /databases/$(database)/documents/bills/$(data.lastOperationBillId);
+      let sightingPath = /databases/$(database)/documents/sightings/$(data.lastOperationSightingId);
+      let billAfter = getAfter(billPath).data;
+      let sightingAfter = getAfter(sightingPath).data;
+      return existsAfter(billPath)
+        && existsAfter(sightingPath)
+        && !exists(sightingPath)
+        && billAfter.id == data.lastOperationBillId
+        && sightingAfter.id == data.lastOperationSightingId
+        && sightingAfter.billId == data.lastOperationBillId
+        && ((!exists(billPath) && billAfter.sightingsCount == 1)
+          || (exists(billPath)
+            && billAfter.sightingsCount == get(billPath).data.sightingsCount + 1));
+    }
+
+    function hasValidRateLimitForBill(billId) {
+      let path = /databases/$(database)/documents/rateLimits/$(request.auth.uid);
+      return existsAfter(path)
+        && getAfter(path).data.lastOperationBillId == billId
+        && isValidRateLimitTransition(request.auth.uid);
+    }
+
+    function hasValidRateLimitForSighting(billId, sightingId) {
+      let path = /databases/$(database)/documents/rateLimits/$(request.auth.uid);
+      return existsAfter(path)
+        && getAfter(path).data.lastOperationBillId == billId
+        && getAfter(path).data.lastOperationSightingId == sightingId
+        && isValidRateLimitTransition(request.auth.uid);
+    }
+
+    match /rateLimits/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Private per-browser/device state. Public bills and sightings never store a UID.
+    match /users/{uid}/trackedBills/{billId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // デフォルト: 他のコレクションへのアクセスは拒否
+    match /{document=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

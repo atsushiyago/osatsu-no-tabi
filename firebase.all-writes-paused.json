@@ -1,0 +1,3 @@
+{
+  "firestore": { "rules": "firestore.all-writes-paused.rules" }
+}
