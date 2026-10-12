@@ -5,6 +5,7 @@ import { readFile, stat, lstat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { maintenanceLock } from '../admin/maintenance-lock.mjs';
 import { countInventory } from './read-budget.mjs';
 import { manifest, saveEncrypted, outsideRepo } from './firestore-backup.mjs';
 const project = 'george-69c3a';
@@ -147,7 +148,9 @@ export async function main(args) {
   try {await lstat(output);reject('OUTPUT_EXISTS');}catch(e){if(e.code!=='ENOENT')throw e;}
   const keyPath=await outsideRepo(values['--passphrase-file']);if((await stat(keyPath)).mode&0o077)reject('PRIVATE_KEY_INPUT_REQUIRED');
   const password=await readFile(keyPath);if(password.length<32)reject('STRONG_PASSPHRASE_REQUIRED');
+  let maintenance;
   try {
+    maintenance = await maintenanceLock('backup');
     // Explicit impersonation only, captured stdout; never use CLI token without this flag.
     const token=await obtainShortToken(a);
     const backup=await productionBackup(a,{token});
@@ -155,6 +158,6 @@ export async function main(args) {
     const {validate}=await import('./firestore-backup.mjs');validate(backup,{doc:path=>({path})},{expectedSource:project});
     await saveEncrypted(output,backup,password);
     console.info(`BACKUP_COMPLETE documents=${backup.manifest.count} reservedReadUnits=${backup.readBudgetUnits}`);
-  } finally {password.fill(0);}
+  } finally {password.fill(0);if (maintenance) await maintenance.release();}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main(process.argv.slice(2)).catch(()=>{console.error('PRODUCTION_BACKUP_FAILED: no success recorded');process.exitCode=1;});

@@ -5,6 +5,8 @@ import { readFile, writeFile, stat, lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { maintenanceLock } from '../admin/maintenance-lock.mjs';
+
 const VectorValue = FieldValue.vector([]).constructor;
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const sha = (value) => createHash('sha256').update(value).digest('hex');
@@ -183,8 +185,9 @@ export async function main(args) {
   const secretPath = await outsideRepo(keyFile); const s = await stat(secretPath);
   if (!s.isFile() || (s.mode & 0o077)) throw new Error('PASSPHRASE_FILE_MUST_BE_PRIVATE');
   const password = await readFile(secretPath);
-  let connection;
+  let connection, maintenance;
   try {
+    if (options.expectedSource === 'george-69c3a') maintenance = await maintenanceLock('backup');
     connection = await openEmulator(project);
     if (command === 'backup') {
       const backup = await capture(connection.db, project); await saveEncrypted(file, backup, password);
@@ -194,7 +197,7 @@ export async function main(args) {
       if (command === 'restore') { const result = await restore(connection.db, project, backup, options); console.info(`RESTORE_VERIFIED documents=${result.count}`); }
       else console.info(`BACKUP_VALID documents=${backup.manifest.count}`);
     }
-  } finally { password.fill(0); if (connection) await connection.close(); }
+  } finally { password.fill(0); if (connection) await connection.close(); if (maintenance) await maintenance.release(); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch(() => { console.error('BACKUP_OPERATION_FAILED: no success recorded; inspect isolated target before retry.'); process.exitCode = 1; });
