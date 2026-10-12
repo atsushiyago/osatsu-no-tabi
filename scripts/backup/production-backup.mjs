@@ -5,6 +5,7 @@ import { readFile, stat, lstat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { countInventory } from './read-budget.mjs';
 import { manifest, saveEncrypted, outsideRepo } from './firestore-backup.mjs';
 const project = 'george-69c3a';
 const exec = promisify(execFile);
@@ -55,7 +56,7 @@ export function rawValue(v, sourceProject) {
   if ('mapValue' in v) return ['map',Object.entries(v.mapValue.fields??{}).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,x])=>[k,rawValue(x,sourceProject)])];
   reject('UNSUPPORTED_FIRESTORE_VALUE');
 }
-export async function productionBackup(a, { token, request = fetch, now = Date.now } = {}) {
+export async function productionBackup(a, { token, request = fetch, now = Date.now, inventory = false } = {}) {
   validateApproval(a,{project:a?.project,database:a?.database,serviceAccount:a?.serviceAccount,output:a?.output},now());
   if (!token || /\s/.test(token)) reject('TOKEN_REQUIRED');
   let units=0, bytes=0;
@@ -80,6 +81,7 @@ export async function productionBackup(a, { token, request = fetch, now = Date.n
   if (info.projectId!==project || String(info.projectNumber)!==a.projectNumber || info.lifecycleState!=='ACTIVE') reject('PROJECT_METADATA_MISMATCH');
   const permissions=await rpc(`https://cloudresourcemanager.googleapis.com/v1/projects/${project}:testIamPermissions`,'POST',{permissions:[...readPermissions,...forbidden]});
   if (!readPermissions.every(p=>permissions.permissions?.includes(p)) || forbidden.some(p=>permissions.permissions?.includes(p))) reject('IAM_NOT_READ_ONLY');
+  if(inventory) return countInventory(rpc,base,a);
   async function scan() {
     const documents=[],collections=[],versions=[];
     const root=base+'/documents';
@@ -128,6 +130,10 @@ export async function productionBackup(a, { token, request = fetch, now = Date.n
   if(JSON.stringify(first)!==JSON.stringify(second))reject('SOURCE_CHANGED_DURING_BACKUP');
   return {format:'osatsu-firestore-backup',version:1,project,database:'(default)',createdAt:new Date(now()).toISOString(),consistency:'two-equal-scans-not-a-snapshot',snapshot:first.snapshot,sourceVersions:first.versions,manifest:{...manifest(first.snapshot),versionsSha256:hash(first.versions)},readBudgetUnits:units};
 }
+export async function obtainShortToken(a) {
+  const {stdout}=await exec('gcloud',['auth','print-access-token',`--impersonate-service-account=${a.serviceAccount}`,'--scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/userinfo.email','--quiet'],{timeout:30000,maxBuffer:16384});
+  return stdout.trim();
+}
 export async function main(args) {
   assertRuntime();
   if(args.length!==12)reject('EXPLICIT_ARGUMENTS_REQUIRED');
@@ -143,8 +149,8 @@ export async function main(args) {
   const password=await readFile(keyPath);if(password.length<32)reject('STRONG_PASSPHRASE_REQUIRED');
   try {
     // Explicit impersonation only, captured stdout; never use CLI token without this flag.
-    const {stdout}=await exec('gcloud',['auth','print-access-token',`--impersonate-service-account=${a.serviceAccount}`,'--scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/userinfo.email','--quiet'],{timeout:30000,maxBuffer:16384});
-    const backup=await productionBackup(a,{token:stdout.trim()});
+    const token=await obtainShortToken(a);
+    const backup=await productionBackup(a,{token});
     // Validate every typed value before writing; dummy refs never connect to a DB.
     const {validate}=await import('./firestore-backup.mjs');validate(backup,{doc:path=>({path})},{expectedSource:project});
     await saveEncrypted(output,backup,password);

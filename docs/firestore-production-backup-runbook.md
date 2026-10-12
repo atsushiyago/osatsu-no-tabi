@@ -101,3 +101,8 @@ Emulatorフラグは独立した `VITE_USE_FIREBASE_EMULATORS`。本番接続は
 - 本番projectを持つ合成ファイル（sourceVersions/SHA含む）はexplicit source指定がある場合のみ空demoへ復元でき、全型・全パス・全値一致。実データは使用していない。
 - 本番認証gcloud/API経路は実行せず、requestを差し替えたモックで成功／権限不足／write権限／誤project/region/identity／期限切れ／通信失敗／更新／予算超過を確認した。
 - proxy/debug環境も拒否。全実効IAMと停止・Spark使用量の人手確認を置き換えるものではない。
+
+
+## 件数・無料枠の事前確認（追加）
+
+全件走査を避けるlimit付きcountと、通信しない予約計算を追加。[件数・予算確認手順](firestore-read-budget.md)を参照。本番SAはユーザー確認済みの `osatsu-backup-reader@george-69c3a.iam.gserviceaccount.com` を使用する。既存のbackup実行と新しいcount実行を無条件に連続実行しない。

@@ -14,6 +14,7 @@ function mock(a,change={}) {
   else if(url.endsWith(':testIamPermissions'))data={permissions:['datastore.entities.get','datastore.entities.list','datastore.databases.getMetadata',...(change.write?['datastore.entities.update']:[])]};
   else if(url.includes('cloudresourcemanager'))data={projectId:a.project,projectNumber:a.projectNumber,lifecycleState:'ACTIVE',...change.project};
   else if(url.endsWith('/databases/(default)'))data={name:`projects/${a.project}/databases/(default)`,locationId:a.region,type:'FIRESTORE_NATIVE',...change.database};
+  else if(url.endsWith(':runAggregationQuery'))data=[{result:{aggregateFields:{total:{integerValue:'5'}}}}];
   else if(url.endsWith(':listCollectionIds'))data=url.endsWith('/documents:listCollectionIds')?{collectionIds:['publicBills']}:{};
   else if(url.includes('/publicBills?')){lists++;data={documents:[{name:`projects/${a.project}/databases/(default)/documents/publicBills/uuid`,updateTime:change.changed&&lists===2?'2026-10-12T03:01:00Z':'2026-10-12T03:00:00Z',fields:{denomination:{integerValue:'1000'},createdAt:{timestampValue:'2026-10-12T03:00:00.123456789Z'},ref:{referenceValue:`projects/${a.project}/databases/(default)/documents/publicBills/uuid`}}}]};if(change.twoDocs)data.documents.push({...data.documents[0],name:data.documents[0].name+'2'});}
   else throw new Error('unexpected mock URL');
@@ -50,3 +51,11 @@ test('typed REST fields preserve precision and cross project refs fail',()=>{
  assert.throws(()=>rawValue({unknownValue:true},'george-69c3a'));
 });
 test('invalid CLI has no network or authentication side effects',async()=>{await assert.rejects(main([]));});
+
+test('count-only path verifies identity/IAM and never starts backup enumeration',async()=>{
+ const a=approval();a.serviceAccount='osatsu-backup-reader@george-69c3a.iam.gserviceaccount.com';const m=mock(a);
+ const result=await productionBackup(a,{token:'fake',request:m.request,now:()=>time,inventory:true});
+ assert.equal(result.kind,'bounded-count-inventory');assert.equal(result.counts.groups.trackedBills,5);
+ assert.equal(m.calls.filter(c=>c.url.endsWith(':runAggregationQuery')).length,11);
+ assert.ok(!m.calls.some(c=>c.url.endsWith(':listCollectionIds')||c.url.includes('showMissing')));
+});

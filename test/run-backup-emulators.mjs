@@ -11,7 +11,7 @@ function run(command,args,childEnv=env) {
 }
 if(process.env.OSATSU_BACKUP_EMULATOR_PHASE==='suite') {
   run(process.execPath,['--test','test/firestore-backup.test.js']);
-  run(process.execPath,['--test','test/production-backup.test.js'],Object.fromEntries(Object.entries(env).filter(([key])=>key!=='FIRESTORE_EMULATOR_HOST')));
+  run(process.execPath,['--test','test/production-backup.test.js','test/read-budget.test.js'],Object.fromEntries(Object.entries(env).filter(([key])=>key!=='FIRESTORE_EMULATOR_HOST')));
   run(process.execPath,['test/run-identity-emulators.mjs'],{...env,OSATSU_IDENTITY_EMULATOR_PHASE:'suite'});
 } else {
   const quote=value=>`'${value.replaceAll("'","'\\''")}'`;

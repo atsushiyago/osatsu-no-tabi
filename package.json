@@ -22,7 +22,9 @@
     "test:backup": "node test/run-backup-emulators.mjs",
     "backup:emulator": "node scripts/backup/firestore-backup.mjs",
     "backup:production": "node scripts/backup/production-backup.mjs",
-    "test:backup:production": "node --test test/production-backup.test.js"
+    "test:backup:production": "node --test test/production-backup.test.js",
+    "backup:budget": "node scripts/backup/check-budget.mjs",
+    "test:backup:budget": "node --test test/read-budget.test.js"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
