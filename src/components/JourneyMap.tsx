@@ -81,31 +81,21 @@ export const JourneyMap = ({
 
       const bgColor = isLatest ? '#9f3b2f' : isFirst ? '#365d4a' : '#a6813d';
       const label = isFirst ? t('origin') : isLatest ? t('latest') : `${s.step}`;
+      const isEndpoint = isFirst || isLatest;
+      const textMeasureContext = document.createElement('canvas').getContext('2d');
+      if (textMeasureContext) {
+        textMeasureContext.font = `700 12px ${getComputedStyle(document.documentElement).fontFamily}`;
+      }
+      const labelWidth = isEndpoint && textMeasureContext
+        ? Math.max(32, Math.ceil(textMeasureContext.measureText(label).width + 20))
+        : 32;
 
-      // カスタムHTMLアイコン（丸いバッジ）
+      // Start / Latest labels use measured pill widths; numbered stops stay circular.
       const customIcon = L.divIcon({
         className: 'custom-journey-pin',
-        html: `
-          <div style="
-            background: ${bgColor};
-            color: #ffffff;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 12px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-            border: 2px solid #ffffff;
-            transform: translate(-50%, -50%);
-          ">
-            ${label}
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        html: `<span class="journey-map-pin${isEndpoint ? ' journey-map-pin--endpoint' : ''}" style="--journey-pin-color:${bgColor}">${escapeHtml(label)}</span>`,
+        iconSize: [labelWidth, 32],
+        iconAnchor: [labelWidth / 2, 16],
       });
 
       const formattedDate = date(s.createdAt, {
@@ -139,7 +129,11 @@ export const JourneyMap = ({
         </div>
       `;
 
-      L.marker([location.lat, location.lng], { icon: customIcon })
+      L.marker([location.lat, location.lng], {
+        icon: customIcon,
+        riseOnHover: true,
+        zIndexOffset: isLatest ? 1000 : isFirst ? 500 : 0,
+      })
         .bindPopup(popupContent)
         .addTo(map);
     });

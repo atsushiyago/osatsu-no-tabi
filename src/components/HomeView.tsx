@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Compass,
   PlusCircle,
@@ -38,6 +38,7 @@ export const HomeView = ({
   onRestoreComplete,
 }: HomeViewProps) => {
   const { language, t, number } = useI18n();
+  const heroTitleRef = useRef<HTMLHeadingElement>(null);
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +51,88 @@ export const HomeView = ({
   const newTrackedBills = trackedBills ? getUnseenTrackedBills(trackedBills) : [];
   const leadingNewBill = newTrackedBills[0];
   const latestPublicSightingRoute = getLatestPublicSightingRoute(leadingNewBill?.bill.sightings);
+
+  useLayoutEffect(() => {
+    const heading = heroTitleRef.current;
+    if (!heading) return;
+
+    const probe = document.createElement('span');
+    probe.className = 'hero-title';
+    probe.textContent = heading.textContent ?? '';
+    Object.assign(probe.style, {
+      display: 'inline-block',
+      position: 'fixed',
+      left: '-10000px',
+      top: '0',
+      width: 'max-content',
+      whiteSpace: 'nowrap',
+      visibility: 'hidden',
+      margin: '0',
+    });
+    document.body.append(probe);
+
+    let lastMeasuredWidth = Number.NaN;
+    let active = true;
+    const measure = (force = false) => {
+      const computedHeading = getComputedStyle(heading);
+      const availableWidth = heading.clientWidth
+        - Number.parseFloat(computedHeading.paddingLeft || '0')
+        - Number.parseFloat(computedHeading.paddingRight || '0');
+      if (!force && Math.abs(availableWidth - lastMeasuredWidth) < 0.5) return;
+      lastMeasuredWidth = availableWidth;
+
+      if (heading.style.whiteSpace !== 'nowrap') heading.style.whiteSpace = 'nowrap';
+      probe.style.removeProperty('font-size');
+      const maxSize = Number.parseFloat(getComputedStyle(probe).fontSize);
+      const widthAt = (size: number) => {
+        probe.style.fontSize = `${size}px`;
+        return probe.getBoundingClientRect().width;
+      };
+
+      if (!availableWidth || !maxSize) return;
+      if (widthAt(maxSize) <= availableWidth) {
+        heading.style.removeProperty('--hero-title-fit-size');
+        return;
+      }
+
+      const minReadableSize = 18;
+      if (widthAt(minReadableSize) > availableWidth) {
+        heading.style.removeProperty('--hero-title-fit-size');
+        heading.style.whiteSpace = 'normal';
+        return;
+      }
+
+      let low = minReadableSize;
+      let high = maxSize;
+      for (let i = 0; i < 14; i += 1) {
+        const middle = (low + high) / 2;
+        if (widthAt(middle) <= availableWidth) low = middle;
+        else high = middle;
+      }
+      heading.style.setProperty('--hero-title-fit-size', `${low}px`);
+    };
+
+    const onResize = () => measure();
+    const onFontsLoaded = () => measure(true);
+    const observer = new ResizeObserver(onResize);
+    observer.observe(heading);
+    window.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    document.fonts?.addEventListener('loadingdone', onFontsLoaded);
+    void document.fonts?.ready.then(() => {
+      if (active) measure(true);
+    });
+    measure(true);
+
+    return () => {
+      active = false;
+      observer.disconnect();
+      window.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      document.fonts?.removeEventListener('loadingdone', onFontsLoaded);
+      probe.remove();
+    };
+  }, [language]);
 
   useEffect(() => {
     async function loadData() {
@@ -120,7 +203,7 @@ export const HomeView = ({
           <span>{t('heroTag')}</span>
         </div>
 
-        <h1 className="hero-title">
+        <h1 ref={heroTitleRef} className="hero-title">
           {t('heroTitle')}
         </h1>
 

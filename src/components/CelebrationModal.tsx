@@ -126,15 +126,7 @@ export const CelebrationModal = ({
           {t('celebrationTitle')}
         </span>
 
-        <h3
-          style={{
-            fontSize: '22px',
-            fontWeight: 800,
-            color: '#0f172a',
-            margin: '0 0 8px 0',
-            lineHeight: 1.3,
-          }}
-        >
+        <h3 className="celebration-message-heading">
           {t('celebrationHeading')}
         </h3>
 
@@ -146,7 +138,7 @@ export const CelebrationModal = ({
             margin: '0 0 20px 0',
           }}
         >
-          <strong style={{ fontSize: '20px', color: '#2563eb' }}>
+          <strong className="celebration-message-count" style={{ color: '#2563eb' }}>
             {t('celebrationCount', { count: number(sightingsCount) })}
           </strong>
         </p>
