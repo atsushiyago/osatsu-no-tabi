@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import type { Denomination, RegisterResult, BillWithSightings } from '../types';
 import { useSerialInput } from '../hooks/useSerialInput';
+import { useI18n } from '../useI18n';
+import type { TranslationKey } from '../i18n';
 import type { OcrSerialCandidate } from '../utils/ocr.ts';
 import type { CropMetadata } from './CropModal';
 import type { OcrDebugData } from './OcrDebugPanel';
@@ -19,6 +21,7 @@ import {
   PREFECTURES,
   getCitiesByPrefecture,
   findNearestCity,
+  getLocalizedPlaceName,
   type CityLocation,
 } from '../utils/geo';
 import {
@@ -35,6 +38,7 @@ import {
 const BILL_COOLDOWN_MS = 15 * 60 * 1000;
 const LazyCropModal = lazy(() => import('./CropModal').then(({ CropModal }) => ({ default: CropModal })));
 const LazyOcrDebugPanel = lazy(() => import('./OcrDebugPanel').then(({ OcrDebugPanel }) => ({ default: OcrDebugPanel })));
+type LocalizedMessage = { key: TranslationKey; values?: Record<string, string | number> } | { text: string; language: 'ja' | 'en' };
 
 function getTimestampMillis(value: BillWithSightings['lastSightedAtServer']): number | null {
   if (typeof value === 'string') {
@@ -49,11 +53,6 @@ function getCooldownRemainingMs(bill: BillWithSightings): number {
   return Math.max(0, BILL_COOLDOWN_MS - (Date.now() - lastSeenMs));
 }
 
-function cooldownMessage(remainingMs: number): string {
-  const minutes = Math.ceil(remainingMs / 60_000);
-  return `このお札はついさっき登録されています。あと約${minutes}分で再登録できます。`;
-}
-
 interface RegisterViewProps {
   initialSerial?: string;
   onSuccess: (result: RegisterResult, trackingFailed?: boolean) => void;
@@ -65,6 +64,7 @@ export const RegisterView = ({
   onSuccess,
   onCancel,
 }: RegisterViewProps) => {
+  const { language, t, number, yen } = useI18n();
   const [denomination, setDenomination] = useState<Denomination>(1000);
   const {
     value: serialInput,
@@ -74,17 +74,32 @@ export const RegisterView = ({
     onCompositionEnd: onSerialCompositionEnd,
     isComposing: isSerialComposing,
     validation,
-  } = useSerialInput(initialSerial);
+  } = useSerialInput(initialSerial, language);
   const [selectedPref, setSelectedPref] = useState('東京都');
   const [selectedCity, setSelectedCity] = useState('千代田区');
   const [userNote, setUserNote] = useState('');
   
   const [availableCities, setAvailableCities] = useState<CityLocation[]>([]);
   const [locating, setLocating] = useState(false);
-  const [locatingMessage, setLocatingMessage] = useState<string | null>(null);
+  const [locatingMessage, setLocatingMessage] = useState<LocalizedMessage | null>(null);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<LocalizedMessage | null>(null);
+  const displayMessage = (message: LocalizedMessage | null) => {
+    if (!message) return null;
+    if ('key' in message) {
+      const values = message.key === 'locationSet' && message.values
+        ? {
+            ...message.values,
+            prefecture: getLocalizedPlaceName(String(message.values.prefecture), language),
+            city: getLocalizedPlaceName(String(message.values.city), language),
+          }
+        : message.values;
+      return t(message.key, values);
+    }
+    return message.language === language ? message.text : t('registrationFailed');
+  };
+  const setErrorKey = (key: TranslationKey, values?: Record<string, string | number>) => setErrorMessage({ key, values });
 
   const [existingBill, setExistingBill] = useState<BillWithSightings | null>(null);
   const [isCheckingExisting, setIsCheckingExisting] = useState(false);
@@ -287,12 +302,12 @@ export const RegisterView = ({
   // GPS取得と市区町村代表座標への丸め込み
   const handleAutoLocate = () => {
     if (!navigator.geolocation) {
-      alert('お使いの端末またはブラウザは位置情報取得に対応していません。');
+      alert(t('locationUnsupported'));
       return;
     }
 
     setLocating(true);
-    setLocatingMessage('位置情報を取得中（市区町村レベルに変換します）...');
+    setLocatingMessage({ key: 'locationGetting' });
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -302,13 +317,13 @@ export const RegisterView = ({
         setSelectedPref(nearest.pref);
         setSelectedCity(nearest.city);
         setLocating(false);
-        setLocatingMessage(`最寄りの「${nearest.pref} ${nearest.city}」を設定しました`);
+        setLocatingMessage({ key: 'locationSet', values: { prefecture: nearest.pref, city: nearest.city } });
         setTimeout(() => setLocatingMessage(null), 4000);
       },
       (err) => {
         console.warn('Geolocation error:', err);
         setLocating(false);
-        setLocatingMessage('位置情報の取得が許可されていないため、手動で選択してください');
+        setLocatingMessage({ key: 'locationDenied' });
         setTimeout(() => setLocatingMessage(null), 4000);
       },
       { timeout: 8000 }
@@ -324,14 +339,14 @@ export const RegisterView = ({
     if (isSerialComposing) return;
 
     // バリデーション
-    const valResult = validateSerialNumber(serialInput);
+    const valResult = validateSerialNumber(serialInput, language);
     if (!valResult.isValid) {
-      setErrorMessage(valResult.message || '記番号をご確認ください');
+      setErrorMessage({ text: valResult.message || t('serialCheckFirst'), language });
       return;
     }
 
     if (isCheckingExisting) {
-      setErrorMessage('登録状況を確認しています。少し待ってからもう一度お試しください。');
+      setErrorKey('checkingBill');
       return;
     }
 
@@ -345,14 +360,14 @@ export const RegisterView = ({
     let billForSubmit = existingBill;
     try {
       if (billForSubmit && !getTimestampMillis(billForSubmit.lastSightedAtServer)) {
-        setErrorMessage('旅の記録を確認できませんでした。もう一度検索してください。');
+        setErrorKey('billCheckFailed');
         return;
       }
 
       if (billForSubmit) {
         const remainingMs = getCooldownRemainingMs(billForSubmit);
         if (remainingMs > 0) {
-          setErrorMessage(cooldownMessage(remainingMs));
+          setErrorKey('cooldown', { minutes: number(Math.ceil(remainingMs / 60_000)) });
           return;
         }
       }
@@ -372,9 +387,7 @@ export const RegisterView = ({
     } catch (err: any) {
       console.error('Registration failed:', err);
       if (err instanceof RegistrationRateLimitError) {
-        setErrorMessage(err.window === 'daily'
-          ? '本日の登録回数が上限に達しました。時間をおいてからもう一度お試しください。'
-          : '短時間に多くの登録が行われました。しばらく待ってからもう一度お試しください。');
+        setErrorKey(err.window === 'daily' ? 'dailyLimit' : 'tooManySubmissions');
         return;
       }
       const rawMsg = err?.message || '';
@@ -383,17 +396,17 @@ export const RegisterView = ({
       if (errorCode) console.error('Firebase registration error detail:', { code: rawCode, message: rawMsg });
 
       if (errorCode === 'permission-denied') {
-        setErrorMessage('登録処理が許可されませんでした。しばらくしてからもう一度お試しください。');
+        setErrorKey('registrationDenied');
       } else if (errorCode === 'unauthenticated') {
-        setErrorMessage('認証の準備が完了していません。ページを再読み込みしてもう一度お試しください。');
+        setErrorKey('authNotReady');
       } else if (errorCode === 'unavailable' || errorCode === 'deadline-exceeded') {
-        setErrorMessage('通信環境をご確認のうえ、もう一度お試しください。');
+        setErrorKey('networkRetry');
       } else if (errorCode === 'resource-exhausted') {
-        setErrorMessage('短時間に多くの登録が行われました。しばらく待ってからもう一度お試しください。');
+        setErrorKey('tooManySubmissions');
       } else if (rawMsg.includes('Missing or insufficient permissions')) {
-        setErrorMessage('登録処理が許可されませんでした。しばらくしてからもう一度お試しください。');
+        setErrorKey('registrationDenied');
       } else {
-        setErrorMessage(rawMsg || '登録中にエラーが発生しました。再度お試しください。');
+        setErrorMessage({ text: language === 'ja' && rawMsg ? rawMsg : t('registrationFailed'), language });
       }
     } finally {
       setIsSubmitting(false);
@@ -404,10 +417,10 @@ export const RegisterView = ({
     <div style={{ paddingBottom: '24px' }}>
       <div style={{ marginBottom: '18px' }}>
         <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a' }}>
-          お札を登録する
+          {t('registerHeading')}
         </h2>
         <p style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-          手元にある紙幣の情報を入力して、旅路を記録しましょう。
+          {t('registerDescription')}
         </p>
       </div>
 
@@ -415,8 +428,8 @@ export const RegisterView = ({
         {/* 額面選択 */}
         <div className="form-group">
           <label className="form-label">
-            <span>1. 額面</span>
-            <span className="form-label-badge">{existingBill ? '登録済み' : '必須'}</span>
+            <span>{t('denominationStep')}</span>
+            <span className="form-label-badge">{existingBill ? t('registered') : t('required')}</span>
           </label>
 
           {existingBill ? (
@@ -449,10 +462,10 @@ export const RegisterView = ({
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: '14px', fontWeight: 800, color: '#1e3a8a' }}>
-                  このお札は {existingBill.denomination.toLocaleString()}円札 として登録済みです
+                  {t('existingDenomination', { amount: number(existingBill.denomination) })}
                 </div>
                 <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '2px' }}>
-                  再発見となるため額面は固定されています（これまでの発見: {existingBill.sightingsCount}回）
+                  {t('fixedDenomination', { count: number(existingBill.sightingsCount) })}
                 </div>
               </div>
             </div>
@@ -472,9 +485,9 @@ export const RegisterView = ({
                   cursor: existingBill ? 'not-allowed' : 'pointer',
                 }}
               >
-                <div className="denom-yen">{val.toLocaleString()}円</div>
+                <div className="denom-yen">{language === 'ja' ? `${number(val)}円` : yen(val)}</div>
                 <div className="denom-label">
-                  {val === 1000 ? '千円札' : val === 5000 ? '五千円札' : '一万円札'}
+                  {t(val === 1000 ? 'denominationLabel1000' : val === 5000 ? 'denominationLabel5000' : 'denominationLabel10000')}
                 </div>
               </button>
             ))}
@@ -484,15 +497,15 @@ export const RegisterView = ({
         {/* 記番号入力 */}
         <div className="form-group">
           <label className="form-label" htmlFor="serialInput">
-            <span>2. 記番号を入力</span>
-            <span className="form-label-badge">必須</span>
+            <span>{t('serialStep')}</span>
+            <span className="form-label-badge">{t('required')}</span>
           </label>
 
           <input
             id="serialInput"
             type="text"
             className="text-input code-font"
-            placeholder="例: AA123456BB"
+            placeholder={t('serialPlaceholder')}
             value={serialInput}
             onChange={(e) => onSerialInputChange(e.target.value)}
             onCompositionStart={onSerialCompositionStart}
@@ -506,8 +519,8 @@ export const RegisterView = ({
             enterKeyHint="done"
           />
           <p className="input-hint">
-            全角・小文字でも自動変換します<br />
-            例：AA123456BB（新紙幣） / A123456B・AA123456B（従来券）
+            {t('serialHelp')}<br />
+            {t('serialExamples')}
           </p>
 
           {/* リアルタイム正規化プレビュー */}
@@ -528,7 +541,7 @@ export const RegisterView = ({
                   <>
                     <CheckCircle size={14} />
                     <span>
-                      正規化記番号: <strong>{formatSerialDisplay(normSerial)}</strong>
+                      {t('normalizedSerial')} <strong>{formatSerialDisplay(normSerial)}</strong>
                     </span>
                   </>
                 ) : (
@@ -541,7 +554,7 @@ export const RegisterView = ({
 
               {validation?.isValid && isCheckingExisting && (
                 <span style={{ color: '#64748b', fontSize: '11px' }}>
-                  （登録状況を確認中...）
+                  {t('checkingRegistration')}
                 </span>
               )}
 
@@ -556,14 +569,14 @@ export const RegisterView = ({
                     borderRadius: '9999px',
                   }}
                 >
-                  🎉 再発見のお札です！
+                  {t('rediscoveryBill')}
                 </span>
               )}
             </div>
           )}
 
           <p className="input-hint">
-            ※全角・半角・小文字は自動変換されます。ハイフンやスペースは不要です。
+            {t('normalizeHelp')}
           </p>
 
           {isTimingDebug && (
@@ -755,10 +768,10 @@ export const RegisterView = ({
         {/* 現在地選択 */}
         <div className="form-group">
           <div className="form-label location-form-label">
-            <span>3. 現在の地域（市区町村まで）</span>
+            <span>{t('locationStep')}</span>
           </div>
           <p className="location-privacy-note">
-            位置情報の自動設定は任意です。保存するのは市区町村までで、GPS座標や正確な住所は保存・公開しません。
+            {t('locationPrivacy')}
           </p>
 
           <button
@@ -769,7 +782,7 @@ export const RegisterView = ({
             id="btn-auto-locate"
           >
             <Navigation size={20} />
-            <span>{locating ? '位置判定中...' : '現在地から市区町村を自動設定'}</span>
+            <span>{locating ? t('locating') : t('locateFromDevice')}</span>
           </button>
 
           {locatingMessage && (
@@ -783,14 +796,14 @@ export const RegisterView = ({
                 borderRadius: '6px',
               }}
             >
-              {locatingMessage}
+              {displayMessage(locatingMessage)}
             </div>
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
               <label style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                都道府県
+                {t('prefecture')}
               </label>
               <select
                 className="text-input"
@@ -801,7 +814,7 @@ export const RegisterView = ({
               >
                 {PREFECTURES.map((pref) => (
                   <option key={pref} value={pref}>
-                    {pref}
+                    {getLocalizedPlaceName(pref, language)}
                   </option>
                 ))}
               </select>
@@ -809,7 +822,7 @@ export const RegisterView = ({
 
             <div>
               <label style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                市区町村
+                {t('municipality')}
               </label>
               <select
                 className="text-input"
@@ -820,7 +833,7 @@ export const RegisterView = ({
               >
                 {availableCities.map((c) => (
                   <option key={c.city} value={c.city}>
-                    {c.city}
+                    {getLocalizedPlaceName(c.city, language)}
                   </option>
                 ))}
               </select>
@@ -832,19 +845,19 @@ export const RegisterView = ({
         {/* 旅のひと言メモ（任意） */}
         <div className="form-group">
           <label className="form-label" htmlFor="userNote">
-            <span>4. 旅のメモ・出会った場所（任意）</span>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>任意</span>
+            <span>{t('memoStep')}</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{t('optional')}</span>
           </label>
           <input
             id="userNote"
             type="text"
             className="text-input"
-            placeholder="例: 駅前のカフェでお釣りとして受け取りました"
+            placeholder={t('memoPlaceholder')}
             value={userNote}
             onChange={(e) => setUserNote(e.target.value)}
             maxLength={60}
           />
-          <p className="input-hint">※最大60文字。個人情報や特定の日時・店舗名は避け、旅の雰囲気のみ記録してください。</p>
+          <p className="input-hint">{t('memoPrivacy')}</p>
         </div>
 
         {/* エラー表示 */}
@@ -864,7 +877,7 @@ export const RegisterView = ({
             }}
           >
             <AlertCircle size={18} style={{ flexShrink: 0 }} />
-            <span>{errorMessage}</span>
+            <span>{displayMessage(errorMessage)}</span>
           </div>
         )}
 
@@ -875,7 +888,7 @@ export const RegisterView = ({
             disabled={isSubmitting || (Boolean(validation?.isValid) && isCheckingExisting)}
             id="btn-submit-registration"
           >
-            <span>{isSubmitting ? '登録しています...' : 'お札の旅を登録する'}</span>
+            <span>{isSubmitting ? t('submitting') : t('submitRegistration')}</span>
           </button>
 
           <button
@@ -883,7 +896,7 @@ export const RegisterView = ({
             className="btn-secondary"
             onClick={onCancel}
           >
-            キャンセル
+            {t('cancel')}
           </button>
         </div>
       </form>

@@ -1,4 +1,5 @@
 import { normalizeSerialInput, validateSerialNumber } from './serial.ts';
+import type { Language } from '../i18n.ts';
 
 export interface SerialInputState {
   value: string;
@@ -24,7 +25,7 @@ export function endSerialComposition(rawValue: string): SerialInputState {
   return { value: normalizeSerialInput(rawValue), isComposing: false };
 }
 
-export function getSerialInputValidation(state: SerialInputState) {
+export function getSerialInputValidation(state: SerialInputState, language: Language = 'ja') {
   if (state.isComposing || !state.value) return null;
-  return validateSerialNumber(state.value);
+  return validateSerialNumber(state.value, language);
 }

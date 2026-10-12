@@ -1,5 +1,7 @@
 import { ArrowRight, MapPin } from 'lucide-react';
 import type { Bill } from '../types';
+import { useI18n } from '../useI18n';
+import { getLocalizedPlaceName } from '../utils/geo';
 
 interface JourneyBillCardProps {
   bill: Bill;
@@ -16,6 +18,7 @@ export function JourneyBillCard({
   latestCity,
   onSelectBill,
 }: JourneyBillCardProps) {
+  const { language, t, number, yen } = useI18n();
   const currentCity = latestCity || bill.lastMunicipality || startCity || '不明';
   const clickable = !isSample && Boolean(onSelectBill);
 
@@ -54,7 +57,7 @@ export function JourneyBillCard({
             marginBottom: '4px',
           }}
         >
-          {isSample && <span className="sample-badge">サンプル</span>}
+          {isSample && <span className="sample-badge">{t('sample')}</span>}
           {!isSample && (
             <span
               style={{
@@ -66,7 +69,7 @@ export function JourneyBillCard({
                 borderRadius: '6px',
               }}
             >
-              {bill.denomination.toLocaleString()}円札
+              {t('yenBill', { amount: language === 'ja' ? number(bill.denomination) : yen(bill.denomination) })}
             </span>
           )}
           <span
@@ -77,7 +80,7 @@ export function JourneyBillCard({
               color: '#334155',
             }}
           >
-            {isSample ? `サンプル旅 ${bill.id.slice(-3)}` : `旅するお札 #${bill.id.slice(0, 4).toUpperCase()}`}
+            {isSample ? t('sampleJourney', { id: bill.id.slice(-3) }) : t('journeyBill', { id: bill.id.slice(0, 4).toUpperCase() })}
           </span>
         </div>
 
@@ -93,19 +96,19 @@ export function JourneyBillCard({
           <MapPin size={15} color="#494b46" />
           {startCity ? (
             <>
-              <span>{startCity}</span>
+              <span>{getLocalizedPlaceName(startCity, language)}</span>
               {currentCity !== startCity && (
                 <>
                   <span style={{ color: '#9f3b2f' }}>→</span>
-                  <span style={{ fontWeight: 700, color: '#7f2f27' }}>{currentCity}</span>
+                  <span style={{ fontWeight: 700, color: '#7f2f27' }}>{getLocalizedPlaceName(currentCity, language)}</span>
                 </>
               )}
             </>
           ) : (
-            <span>最終発見地: {currentCity}</span>
+            <span>{t('lastLocation', { city: getLocalizedPlaceName(currentCity, language) })}</span>
           )}
           <span style={{ color: '#494b46', fontSize: '15px' }}>
-            ({bill.sightingsCount}回目・約{bill.totalDistanceKm}km)
+            ({t('discoveryNth', { count: number(bill.sightingsCount) })}・{t('approximateDistance', { distance: number(bill.totalDistanceKm) })})
           </span>
         </div>
       </div>

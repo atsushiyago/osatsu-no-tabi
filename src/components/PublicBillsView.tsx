@@ -5,6 +5,7 @@ import {
   type PublicBillsCursor,
 } from '../services/billService';
 import type { Bill } from '../types';
+import { useI18n } from '../useI18n';
 
 interface PublicBillsViewProps {
   onSelectBill: (publicBillId: string, visibleCount: number) => void;
@@ -19,6 +20,7 @@ export function PublicBillsView({
   restoreVisibleCount,
   onRestoreComplete,
 }: PublicBillsViewProps) {
+  const { t } = useI18n();
   const [bills, setBills] = useState<Bill[]>([]);
   const [cursor, setCursor] = useState<PublicBillsCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -107,13 +109,13 @@ export function PublicBillsView({
 
   return (
     <section className="public-bills-view" aria-labelledby="public-bills-title">
-      <h1 id="public-bills-title">みんなのお札</h1>
-      <p className="tracked-bills-note">登録されたお札を新しい順に表示しています。</p>
+      <h1 id="public-bills-title">{t('publicBillsTitle')}</h1>
+      <p className="tracked-bills-note">{t('publicBillsDescription')}</p>
 
-      {loading && <p role="status">一覧を読み込んでいます…</p>}
+      {loading && <p role="status">{t('loadingList')}</p>}
       {!loading && error && bills.length === 0 && (
         <div>
-          <p role="alert">一覧を読み込めませんでした。通信環境を確認してください。</p>
+          <p role="alert">{t('loadError')}</p>
           <button
             className="btn-secondary public-bills-retry"
             onClick={() => {
@@ -122,18 +124,18 @@ export function PublicBillsView({
               setRetryKey((key) => key + 1);
             }}
           >
-            もう一度読み込む
+            {t('retry')}
           </button>
         </div>
       )}
       {!loading && !error && bills.length === 0 && (
         <div className="tracked-bills-empty">
-          <h2>まだ登録されたお札はありません</h2>
+          <h2>{t('noPublicBills')}</h2>
         </div>
       )}
 
       {bills.length > 0 && (
-        <div className="tracked-bills-list" aria-label="登録された公開紙幣">
+        <div className="tracked-bills-list" aria-label={t('publicListLabel')}>
           {bills.map((bill) => (
             <JourneyBillCard
               key={bill.id}
@@ -145,10 +147,10 @@ export function PublicBillsView({
         </div>
       )}
 
-      {error && bills.length > 0 && <p role="alert">次の一覧を読み込めませんでした。もう一度お試しください。</p>}
+      {error && bills.length > 0 && <p role="alert">{t('nextPageError')}</p>}
       {!loading && hasMore && (
         <button className="btn-secondary public-bills-more" onClick={loadMore} disabled={loadingMore}>
-          {loadingMore ? '読み込んでいます…' : 'もっと見る'}
+          {loadingMore ? t('loadingMore') : t('loadMore')}
         </button>
       )}
     </section>

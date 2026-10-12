@@ -15,6 +15,7 @@ import { PublicBillsView } from './components/PublicBillsView';
 import { ensureAnonymousUser, observeAuthState } from './services/firebase';
 import { getTrackedBills, getTrackedBillsCount, type TrackedBillRow } from './services/trackedBills';
 import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
+import { useI18n } from './useI18n';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked' | 'bills';
 type TrackedBillsLoadResult = {
@@ -30,6 +31,7 @@ type BillReturnContext = {
 };
 
 export function App() {
+  const { language, setLanguage, t } = useI18n();
   const [currentView, setCurrentView] = useState<ViewMode>('home');
   const [selectedPublicBillId, setSelectedPublicBillId] = useState<string>('');
   const [registerInitialSerial, setRegisterInitialSerial] = useState<string>('');
@@ -249,9 +251,7 @@ export function App() {
         },
         countTrackedBills: getTrackedBillsCount,
         confirmSwitch: () => window.confirm(
-          'このGoogleアカウントには、すでに「お札の旅」のデータがあります。\n\n' +
-          'このブラウザには未同期の「登録したお札」があります。既存のGoogle同期データへ切り替えると、このブラウザの一覧は自動では統合されません。\n\n' +
-          '既存のGoogle同期データへ切り替えますか？'
+          `${t('switchGoogleTitle')}\n\n${t('switchGoogleWarning')}\n\n${t('switchGooglePrompt')}`
         ),
       });
 
@@ -270,7 +270,7 @@ export function App() {
       const code = (error as { code?: string })?.code ?? 'unknown';
       console.warn(`[Google sync] Firebase Auth failed: ${code}`, error);
       const message = getGoogleSyncErrorMessage(error as { code?: string } | null);
-      if (message) setGoogleSyncError(message);
+      if (message) setGoogleSyncError(code);
     } finally {
       setGoogleSyncing(false);
     }
@@ -295,7 +295,7 @@ export function App() {
       const code = (error as { code?: string })?.code ?? 'unknown';
       console.warn(`[Google sync] Explicit popup fallback failed: ${code}`, error);
       const message = getGoogleSyncErrorMessage(error as { code?: string } | null);
-      if (message) setGoogleSyncError(message);
+      if (message) setGoogleSyncError(code);
     } finally {
       setGoogleSyncing(false);
     }
@@ -337,7 +337,7 @@ export function App() {
             lineHeight: 1.4,
           }}
         >
-          ⚠️ Firebase環境変数が未設定です。Cloudflare (Workers Builds) の環境変数を設定してください。
+          {t('firebaseEnvWarning')}
         </div>
       )}
 
@@ -346,9 +346,14 @@ export function App() {
         <div className="brand" onClick={() => navigateTo('home')}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span className="brand-title">お札の旅</span>
+              <span className="brand-title">{t('brand')}</span>
             </div>
           </div>
+        </div>
+        <div className="language-switch" role="group" aria-label="Language / 言語">
+          <button type="button" className={language === 'ja' ? 'selected' : ''} aria-pressed={language === 'ja'} onClick={() => setLanguage('ja')}>日本語</button>
+          <span aria-hidden="true">/</span>
+          <button type="button" className={language === 'en' ? 'selected' : ''} aria-pressed={language === 'en'} onClick={() => setLanguage('en')}>English</button>
         </div>
       </header>
 
@@ -356,7 +361,7 @@ export function App() {
       <main className="main-content">
         {currentView === 'bill' && trackingNotice && (
           <p className="tracked-bills-warning" role="status">
-            登録は完了しましたが、「登録したお札」の一覧には保存できませんでした。
+            {t('trackedSaveFailed')}
           </p>
         )}
         {currentView === 'home' && (
@@ -417,7 +422,7 @@ export function App() {
             onRestoreComplete={clearBillReturnForRestore}
             syncState={authIsGoogleLinked ? 'linked' : authIsAnonymous ? 'anonymous' : 'other'}
             syncing={googleSyncing}
-            syncError={googleSyncError}
+            syncError={googleSyncError ? getGoogleSyncErrorMessage({ code: googleSyncError }, language) : null}
             onGoogleSync={handleGoogleSync}
             popupFallbackAvailable={googlePopupFallbackAvailable}
             onGooglePopupFallback={handleGooglePopupFallback}
@@ -425,14 +430,14 @@ export function App() {
         )}
         {currentView === 'tracked' && !authReady && (
           <div className="tracked-bills-unavailable" role="status" aria-live="polite">
-            <h1>登録したお札</h1>
-            <p>登録したお札を準備しています…</p>
+            <h1>{t('trackedTitle')}</h1>
+            <p>{t('trackedPrepare')}</p>
           </div>
         )}
         {currentView === 'tracked' && authReady && !authUid && (
           <div className="tracked-bills-unavailable">
-            <h1>登録したお札</h1>
-            <p>現在この機能を利用できません。公開中のお札の検索や閲覧は引き続き利用できます。</p>
+            <h1>{t('trackedTitle')}</h1>
+            <p>{t('trackedUnavailable')}</p>
           </div>
         )}
         {currentView === 'bills' && (
@@ -444,7 +449,7 @@ export function App() {
           />
         )}
 
-        <footer className="app-social-links" aria-label="外部リンク">
+        <footer className="app-social-links" aria-label={t('social')}>
           <a
             href="https://x.com/bicycle_geek"
             target="_blank"
@@ -468,7 +473,7 @@ export function App() {
           id="nav-home"
         >
           <Compass size={20} />
-          <span>ホーム</span>
+          <span>{t('home')}</span>
         </button>
 
         <button
@@ -477,7 +482,7 @@ export function App() {
           id="nav-register"
         >
           <PlusCircle size={20} />
-          <span>登録する</span>
+          <span>{t('register')}</span>
         </button>
 
         <button
@@ -486,7 +491,7 @@ export function App() {
           id="nav-search"
         >
           <Search size={20} />
-          <span>検索</span>
+          <span>{t('search')}</span>
         </button>
 
         <button
@@ -495,7 +500,7 @@ export function App() {
           id="nav-tracked-bills"
         >
           <WalletCards size={20} />
-          <span>登録したお札</span>
+          <span>{t('tracked')}</span>
         </button>
       </nav>
       <TimingMonitor />

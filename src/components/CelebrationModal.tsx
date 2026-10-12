@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { Sparkles, MapPin, Calendar, ArrowRight } from 'lucide-react';
 import type { RegisterResult } from '../types';
+import { useI18n } from '../useI18n';
 
 interface CelebrationModalProps {
   result: RegisterResult;
@@ -16,6 +17,7 @@ export const CelebrationModal = ({
   onViewJourney,
   onViewTrackedBills,
 }: CelebrationModalProps) => {
+  const { t, number } = useI18n();
   useEffect(() => {
     // 華やかな紙吹雪エフェクト
     const duration = 2.5 * 1000;
@@ -121,7 +123,7 @@ export const CelebrationModal = ({
             marginBottom: '8px',
           }}
         >
-          奇跡の再発見！ (HIT)
+          {t('celebrationTitle')}
         </span>
 
         <h3
@@ -133,9 +135,7 @@ export const CelebrationModal = ({
             lineHeight: 1.3,
           }}
         >
-          このお札は以前にも
-          <br />
-          登録されています！
+          {t('celebrationHeading')}
         </h3>
 
         <p
@@ -146,12 +146,9 @@ export const CelebrationModal = ({
             margin: '0 0 20px 0',
           }}
         >
-          あなたはこのお札の
-          <br />
           <strong style={{ fontSize: '20px', color: '#2563eb' }}>
-            第 {sightingsCount} 人目の発見者
+            {t('celebrationCount', { count: number(sightingsCount) })}
           </strong>
-          です！
         </p>
 
         {/* 旅のダイジェストカード */}
@@ -180,10 +177,10 @@ export const CelebrationModal = ({
               }}
             >
               <MapPin size={14} />
-              <span>前回の街から</span>
+              <span>{t('lastCity')}</span>
             </div>
             <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
-              約 {distanceFromPrevKm} <span style={{ fontSize: '12px' }}>km</span>
+              {number(distanceFromPrevKm)} <span style={{ fontSize: '12px' }}>km</span>
             </div>
           </div>
 
@@ -202,20 +199,20 @@ export const CelebrationModal = ({
               }}
             >
               <Calendar size={14} />
-              <span>経過日数</span>
+              <span>{t('daysSince')}</span>
             </div>
             <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
-              {daysFromPrev} <span style={{ fontSize: '12px' }}>日ぶり</span>
+              {number(daysFromPrev)} <span style={{ fontSize: '12px' }}>{t('daysAgo')}</span>
             </div>
           </div>
         </div>
 
         <div className="registration-return-note celebration-return-note" role="status">
-          <p>このお札を手元に保管する必要はありません。いつも通りお使いください。</p>
-          <p>数週間したら、また旅の続きを見にきてください。</p>
+          <p>{t('useNormally')}</p>
+          <p>{t('visitAgain')}</p>
           {onViewTrackedBills && (
             <button className="registration-return-link" onClick={onViewTrackedBills}>
-              登録したお札を見る
+              {t('viewTracked')}
             </button>
           )}
         </div>
@@ -243,7 +240,7 @@ export const CelebrationModal = ({
             onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
             onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
           >
-            <span>お札の旅の軌跡を見る</span>
+            <span>{t('viewJourney')}</span>
             <ArrowRight size={18} />
           </button>
 
@@ -258,7 +255,7 @@ export const CelebrationModal = ({
               cursor: 'pointer',
             }}
           >
-            閉じる
+            {t('close')}
           </button>
         </div>
       </div>

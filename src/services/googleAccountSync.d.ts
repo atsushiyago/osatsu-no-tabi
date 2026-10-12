@@ -19,4 +19,4 @@ export function syncGoogleAccount(options: {
   uid: string;
 }>;
 
-export function getGoogleSyncErrorMessage(error: { code?: string } | null | undefined): string | null;
+export function getGoogleSyncErrorMessage(error: { code?: string } | null | undefined, language?: 'ja' | 'en'): string | null;

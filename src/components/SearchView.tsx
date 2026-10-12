@@ -4,6 +4,7 @@ import { getBillBySerial } from '../services/billService';
 import { prepareSerialSearch, runValidatedSerialSearch } from '../utils/serialSearch';
 import { useSerialInput } from '../hooks/useSerialInput';
 import { isDebugTiming } from '../utils/debug';
+import { useI18n } from '../useI18n';
 
 interface SearchViewProps {
   onBillFound: (serial: string) => void;
@@ -11,6 +12,7 @@ interface SearchViewProps {
 }
 
 export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
+  const { language, t } = useI18n();
   const {
     value: searchInput,
     setValue: setSearchInput,
@@ -19,7 +21,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     onCompositionEnd,
     isComposing,
     validation,
-  } = useSerialInput();
+  } = useSerialInput('', language);
   const [isSearching, setIsSearching] = useState(false);
   const [searchedSerial, setSearchedSerial] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -71,17 +73,17 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
     <div>
       <div style={{ marginBottom: '20px' }}>
         <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a' }}>
-          記番号を検索する
+          {t('searchHeading')}
         </h2>
         <p style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-          紙幣に印字されたアルファベットと数字を入力してください。
+          {t('searchDescription')}
         </p>
       </div>
 
       <form onSubmit={handleSearch} className="form-card" style={{ marginBottom: '20px' }}>
         <div className="form-group" style={{ marginBottom: '14px' }}>
           <label className="form-label" htmlFor="searchSerialInput">
-            <span>記番号</span>
+            <span>{t('serialLabel')}</span>
           </label>
           <div style={{ position: 'relative' }}>
             <input
@@ -89,7 +91,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
               name="serial"
               type="text"
               className="text-input code-font"
-              placeholder="例: AA123456BB"
+              placeholder={t('serialPlaceholder')}
               value={searchInput}
               onChange={(e) => {
                 onSerialInputChange(e.target.value);
@@ -110,8 +112,8 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
             />
           </div>
           <p className="input-hint">
-            全角・小文字でも自動変換します<br />
-            例：AA123456BB（新紙幣） / A123456B・AA123456B（従来券）
+            {t('serialHelp')}<br />
+            {t('serialExamples')}
           </p>
           {searchInput && validation && (
             <div
@@ -127,7 +129,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
             >
               {validation.isValid ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
               {validation.isValid ? (
-                <span>記番号の形式は正しいです</span>
+                <span>{t('serialValid')}</span>
               ) : (
                 <span>{validation.message}</span>
               )}
@@ -142,7 +144,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           id="btn-execute-search"
         >
           <Search size={18} />
-          <span>{isSearching ? '検索中...' : 'このお札の旅を調べる'}</span>
+          <span>{isSearching ? t('searching') : t('executeSearch')}</span>
         </button>
       </form>
 
@@ -176,13 +178,13 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
           </div>
 
           <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#282a27', marginBottom: '8px' }}>
-            この記番号のお札は、このサービスにはまだ登録されていません。
+            {t('notFoundHeading')}
           </h3>
 
           <p style={{ fontSize: '16px', color: '#494b46', lineHeight: 1.6, marginBottom: '18px' }}>
-            入力した記番号を最初に登録して、旅の記録を始められます。
+            {t('notFoundText')}
             <br />
-            <strong>あなたが最初の発見者になりませんか？</strong>
+            <strong>{t('firstDiscoverer')}</strong>
           </p>
 
           <button
@@ -190,7 +192,7 @@ export const SearchView = ({ onBillFound, onRegisterNew }: SearchViewProps) => {
             onClick={() => onRegisterNew(searchedSerial)}
             id="btn-register-not-found"
           >
-            <span>この記番号で最初の登録をする</span>
+            <span>{t('registerThisSerial')}</span>
           </button>
         </div>
       )}

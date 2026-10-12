@@ -1,3 +1,5 @@
+import { translate } from '../i18n.ts';
+
 export function getGoogleSyncState(user) {
   if (!user) return 'unavailable';
   if (user.isAnonymous) return 'anonymous';
@@ -48,12 +50,12 @@ export async function syncGoogleAccount({
   }
 }
 
-export function getGoogleSyncErrorMessage(error) {
+export function getGoogleSyncErrorMessage(error, language = 'ja') {
   const code = error?.code ?? '';
   if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return null;
-  if (code === 'auth/popup-blocked') return 'Google認証の画面を開けませんでした。ポップアップを許可して、もう一度お試しください。';
-  if (code === 'auth/network-request-failed') return '通信に失敗しました。ネットワークを確認して、もう一度お試しください。';
-  if (code === 'auth/operation-not-allowed') return 'Googleログインがまだ有効になっていません。時間をおいて再度お試しください。';
-  if (code === 'auth/unauthorized-domain') return 'このサイトではGoogleログインを利用できません。管理者へお問い合わせください。';
-  return 'Googleとの同期に失敗しました。時間をおいて再度お試しください。';
+  if (code === 'auth/popup-blocked') return translate(language, 'googlePopupBlocked');
+  if (code === 'auth/network-request-failed') return translate(language, 'googleNetworkError');
+  if (code === 'auth/operation-not-allowed') return translate(language, 'googleNotEnabled');
+  if (code === 'auth/unauthorized-domain') return translate(language, 'googleUnauthorizedDomain');
+  return translate(language, 'googleGenericError');
 }

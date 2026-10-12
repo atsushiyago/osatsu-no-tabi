@@ -3,6 +3,8 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Sighting } from '../types';
 import { getMunicipalityLocation } from '../utils/geo';
+import { getLocalizedLocationLabel } from '../utils/geo';
+import { useI18n } from '../useI18n';
 
 interface JourneyMapProps {
   sightings: Sighting[];
@@ -15,6 +17,7 @@ export const JourneyMap = ({
   height = '360px',
   interactive = true,
 }: JourneyMapProps) => {
+  const { language, t, number, date } = useI18n();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
 
@@ -77,7 +80,7 @@ export const JourneyMap = ({
       const isLatest = idx === sightings.length - 1 && sightings.length > 1;
 
       const bgColor = isLatest ? '#9f3b2f' : isFirst ? '#365d4a' : '#a6813d';
-      const label = isFirst ? '起点' : isLatest ? '最新' : `${s.step}`;
+      const label = isFirst ? t('origin') : isLatest ? t('latest') : `${s.step}`;
 
       // カスタムHTMLアイコン（丸いバッジ）
       const customIcon = L.divIcon({
@@ -105,7 +108,7 @@ export const JourneyMap = ({
         iconAnchor: [16, 16],
       });
 
-      const formattedDate = new Date(s.createdAt).toLocaleDateString('ja-JP', {
+      const formattedDate = date(s.createdAt, {
         year: 'numeric',
         month: 'numeric',
         day: 'numeric',
@@ -114,15 +117,15 @@ export const JourneyMap = ({
       const popupContent = `
         <div style="font-family: inherit; font-size: 13px; line-height: 1.5; padding: 4px;">
           <div style="font-weight: 700; color: #1e293b; font-size: 14px; margin-bottom: 2px;">
-            第${s.step}の足跡: ${s.prefecture} ${s.municipality}
+            ${escapeHtml(t('stepLabel', { step: number(s.step) }))}: ${escapeHtml(getLocalizedLocationLabel(s.prefecture, s.municipality, language))}
           </div>
           <div style="color: #64748b; font-size: 12px; margin-bottom: 6px;">
-            登録日: ${formattedDate}
+            ${escapeHtml(t('registrationDate'))}: ${formattedDate}
           </div>
           ${
             s.distanceFromPrevKm && s.distanceFromPrevKm > 0
               ? `<div style="color: #2563eb; font-weight: 600; font-size: 12px; margin-bottom: 4px;">
-                  前の街から: 約${s.distanceFromPrevKm}km移動 (${s.daysFromPrev ?? 0}日)
+                  ${escapeHtml(t('fromPrevious'))}: ${language === 'ja' ? '約' : 'about '}${number(s.distanceFromPrevKm)}km ${escapeHtml(t('moved'))} (${number(s.daysFromPrev ?? 0)} ${escapeHtml(t('dayUnit'))})
                 </div>`
               : ''
           }
@@ -158,7 +161,7 @@ export const JourneyMap = ({
         mapInstanceRef.current = null;
       }
     };
-  }, [sightings, interactive]);
+  }, [sightings, interactive, language, t, date, number]);
 
   return (
     <div
@@ -191,7 +194,7 @@ export const JourneyMap = ({
             pointerEvents: 'none',
           }}
         >
-          {sightings.length}箇所の経由地
+          {t('routeStops', { count: number(sightings.length) })}
         </div>
       )}
     </div>

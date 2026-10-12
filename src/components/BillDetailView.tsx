@@ -12,6 +12,8 @@ import type { BillWithSightings } from '../types';
 import { getPublicBillById } from '../services/billService';
 import { JourneyMap } from './JourneyMap';
 import { markTrackedBillSeen } from '../services/trackedBills';
+import { useI18n } from '../useI18n';
+import { getLocalizedLocationLabel } from '../utils/geo';
 
 interface BillDetailViewProps {
   publicBillId: string;
@@ -30,6 +32,7 @@ export const BillDetailView = ({
   onNavigateTrackedBills,
   onBack,
 }: BillDetailViewProps) => {
+  const { language, t, number, date, yen } = useI18n();
   const [billData, setBillData] = useState<BillWithSightings | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -66,8 +69,8 @@ export const BillDetailView = ({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `お札の旅 - ${billData?.denomination}円札`,
-          text: `この${billData?.denomination}円札は${billData?.sightingsCount}回発見され、日本を約${billData?.totalDistanceKm}km旅しています！`,
+          title: t('shareTitle', { amount: number(billData?.denomination ?? 0) }),
+          text: t('shareDescription', { amount: number(billData?.denomination ?? 0), count: number(billData?.sightingsCount ?? 0), distance: number(billData?.totalDistanceKm ?? 0) }),
           url,
         });
         return;
@@ -81,7 +84,7 @@ export const BillDetailView = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      alert('URLのコピーに失敗しました');
+      alert(t('copyFailed'));
     }
   };
 
@@ -89,7 +92,7 @@ export const BillDetailView = ({
     return (
       <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748b' }}>
         <Compass size={36} className="animate-spin" color="#2563eb" style={{ margin: '0 auto 12px' }} />
-        <p style={{ fontWeight: 600 }}>旅の記憶を読み込んでいます...</p>
+        <p style={{ fontWeight: 600 }}>{t('detailLoading')}</p>
       </div>
     );
   }
@@ -98,13 +101,13 @@ export const BillDetailView = ({
     return (
       <div style={{ textAlign: 'center', padding: '40px 20px' }}>
         <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>
-          お札が見つかりませんでした
+          {t('billMissing')}
         </h3>
         <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px' }}>
-          指定された旅の記録は見つかりませんでした。
+          {t('billMissingDescription')}
         </p>
         <button className="btn-secondary" onClick={onBack}>
-          戻る
+          {t('back')}
         </button>
       </div>
     );
@@ -113,7 +116,7 @@ export const BillDetailView = ({
   const { denomination, sightingsCount, totalDistanceKm, sightings, firstSightedAt, lastSightedAt } =
     billData;
 
-  const firstDateStr = new Date(firstSightedAt).toLocaleDateString('ja-JP', {
+  const firstDateStr = date(firstSightedAt, {
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
@@ -155,7 +158,7 @@ export const BillDetailView = ({
           id="btn-back-from-detail"
         >
           <ArrowLeft size={18} />
-          <span>戻る</span>
+          <span>{t('back')}</span>
         </button>
 
         <button
@@ -177,7 +180,7 @@ export const BillDetailView = ({
           id="btn-share-bill"
         >
           {copied ? <Check size={14} /> : <Share2 size={14} />}
-          <span>{copied ? 'リンクをコピーしました！' : '旅をシェア'}</span>
+          <span>{copied ? t('copied') : t('shareJourney')}</span>
         </button>
       </div>
 
@@ -211,10 +214,10 @@ export const BillDetailView = ({
               color: '#ffffff',
             }}
           >
-            {denomination.toLocaleString()}円札
+            {t('yenBill', { amount: language === 'ja' ? number(denomination) : yen(denomination) })}
           </span>
           <span style={{ fontSize: '16px', color: '#f4efe3' }}>
-            {sightingsCount >= 2 ? '継続中の旅' : '最初の発見'}
+            {sightingsCount >= 2 ? t('ongoingJourney') : t('firstDiscovery')}
           </span>
         </div>
 
@@ -228,7 +231,7 @@ export const BillDetailView = ({
             marginBottom: '16px',
           }}
         >
-          旅するお札 #{publicBillId.slice(0, 4).toUpperCase()}
+          {t('journeyBill', { id: publicBillId.slice(0, 4).toUpperCase() })}
         </div>
 
         {/* 4つの主要指標 */}
@@ -242,30 +245,30 @@ export const BillDetailView = ({
           }}
         >
           <div>
-            <span style={{ fontSize: '15px', color: '#f4efe3' }}>発見回数</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>{t('discoveryCount')}</span>
             <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
-              {sightingsCount} <span style={{ fontSize: '12px', color: '#ffffff' }}>回</span>
+              {number(sightingsCount)} <span style={{ fontSize: '12px', color: '#ffffff' }}>{t('statsSightingUnit')}</span>
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '15px', color: '#f4efe3' }}>最初の登録</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>{t('firstRegistered')}</span>
             <div style={{ fontSize: '17px', fontWeight: 700, color: '#ffffff', marginTop: '2px' }}>
               {firstDateStr}
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '15px', color: '#f4efe3' }}>総移動距離</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>{t('totalDistance')}</span>
             <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
-              約 {totalDistanceKm} <span style={{ fontSize: '12px', color: '#ffffff' }}>km</span>
+              {language === 'ja' ? '約 ' : 'About '}{number(totalDistanceKm)} <span style={{ fontSize: '12px', color: '#ffffff' }}>km</span>
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '15px', color: '#f4efe3' }}>経過日数</span>
+            <span style={{ fontSize: '15px', color: '#f4efe3' }}>{t('elapsedDays')}</span>
             <div style={{ fontSize: '22px', fontWeight: 800, color: '#ffffff' }}>
-              {totalDays} <span style={{ fontSize: '12px', color: '#ffffff' }}>日</span>
+              {number(totalDays)} <span style={{ fontSize: '12px', color: '#ffffff' }}>{t('dayUnit')}</span>
             </div>
           </div>
         </div>
@@ -273,12 +276,12 @@ export const BillDetailView = ({
 
       {registrationCompleted && (
         <aside className="registration-return-note" aria-labelledby="registration-return-title" role="status">
-          <h2 id="registration-return-title">登録しました</h2>
-          <p>このお札を手元に保管する必要はありません。いつも通りお使いください。</p>
-          <p>数週間したら、また旅の続きを見にきてください。</p>
+          <h2 id="registration-return-title">{t('registeredSuccess')}</h2>
+          <p>{t('useNormally')}</p>
+          <p>{t('visitAgain')}</p>
           {showTrackedBillsLink && onNavigateTrackedBills && (
             <button className="registration-return-link" onClick={onNavigateTrackedBills}>
-              登録したお札を見る
+              {t('viewTracked')}
             </button>
           )}
         </aside>
@@ -307,10 +310,10 @@ export const BillDetailView = ({
             }}
           >
             <Navigation size={18} color="#9f3b2f" />
-            <span>日本列島の移動軌跡</span>
+            <span>{t('mapTitle')}</span>
           </h3>
           <span style={{ fontSize: '15px', color: '#494b46' }}>
-            地図の印を選ぶと詳細を確認できます
+            {t('mapHint')}
           </span>
         </div>
 
@@ -338,7 +341,7 @@ export const BillDetailView = ({
             }}
           >
             <Calendar size={18} color="#365d4a" />
-            <span>移動履歴 ({sightings.length}地点)</span>
+            <span>{t('historyTitle', { count: number(sightings.length) })}</span>
           </h3>
         </div>
 
@@ -346,7 +349,7 @@ export const BillDetailView = ({
           {sightings.map((s, idx) => {
             const isFirst = idx === 0;
             const isLatest = idx === sightings.length - 1 && sightings.length > 1;
-            const dateStr = new Date(s.createdAt).toLocaleDateString('ja-JP', {
+            const dateStr = date(s.createdAt, {
               year: 'numeric',
               month: 'long',
               day: 'numeric',
@@ -388,7 +391,7 @@ export const BillDetailView = ({
                           borderRadius: '4px',
                         }}
                       >
-                        第{s.step}の足跡 {isFirst ? '(起点)' : isLatest ? '(最新)' : ''}
+                        {t('stepLabel', { step: number(s.step) })} {isFirst ? `(${t('origin')})` : isLatest ? `(${t('latest')})` : ''}
                       </span>
                     </div>
                     <span style={{ fontSize: '15px', color: '#494b46' }}>{dateStr}</span>
@@ -407,7 +410,7 @@ export const BillDetailView = ({
                   >
                     <MapPin size={18} color="#9f3b2f" />
                     <span>
-                      {s.prefecture} {s.municipality}
+                      {getLocalizedLocationLabel(s.prefecture, s.municipality, language)}
                     </span>
                   </div>
 
@@ -420,7 +423,7 @@ export const BillDetailView = ({
                         fontWeight: 600,
                       }}
                     >
-                      前回の街から 約{s.distanceFromPrevKm}km 移動 ({s.daysFromPrev ?? 0}日)
+                    {t('fromPrevious')} {language === 'ja' ? '約' : 'about '}{number(s.distanceFromPrevKm)}km {t('moved')} ({number(s.daysFromPrev ?? 0)} {t('dayUnit')})
                     </div>
                   ) : null}
 

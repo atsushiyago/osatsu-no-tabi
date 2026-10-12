@@ -1,3 +1,6 @@
+
+import { translate, type Language } from '../i18n.ts';
+
 /**
  * 日本円紙幣の記番号正規化および検証ユーティリティ
  */
@@ -35,33 +38,33 @@ export function normalizeSerialInput(input: string): string {
  * - AA123456BB
  * - A123456A
  */
-export function validateSerialNumber(serial: string): {
+export function validateSerialNumber(serial: string, language: Language = 'ja'): {
   isValid: boolean;
   message?: string;
 } {
   const norm = normalizeSerialNumber(serial);
 
   if (!norm) {
-    return { isValid: false, message: '記番号を入力してください' };
+    return { isValid: false, message: translate(language, 'serialRequired') };
   }
 
   const parts = norm.match(/^([A-Z]{1,2})([0-9]{6})([A-Z]{1,2})$/);
-  if (!parts) return { isValid: false, message: '記番号の形式を確認してください。' };
+  if (!parts) return { isValid: false, message: translate(language, 'serialInvalid') };
 
   if (/[IO]/.test(parts[1] + parts[3])) {
-    return { isValid: false, message: '記番号の英字には I（アイ）と O（オー）は使われません' };
+    return { isValid: false, message: translate(language, 'serialForbiddenLetters') };
   }
 
   const [, prefix, digits, suffix] = parts;
   const isLegacy = prefix.length >= 1 && prefix.length <= 2 && suffix.length === 1;
   const isNew = prefix.length === 2 && suffix.length === 2;
   if (!isLegacy && !isNew) {
-    return { isValid: false, message: '記番号の形式を確認してください。' };
+    return { isValid: false, message: translate(language, 'serialInvalid') };
   }
 
   const serialNumber = Number(digits);
   if (serialNumber < 1 || serialNumber > 900000) {
-    return { isValid: false, message: '記番号の数字部分は000001〜900000です' };
+    return { isValid: false, message: translate(language, 'serialRange') };
   }
 
   return { isValid: true };
