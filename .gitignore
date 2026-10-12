@@ -32,3 +32,9 @@ credentials*.json
 *.njsproj
 *.sln
 *.sw?
+
+# Sensitive local Firestore/Auth backups (keep outside repository too)
+backups/
+*.osatsu-backup
+*.backup.json
+*.passphrase

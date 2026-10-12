@@ -18,7 +18,9 @@
     "test:serial-input": "node --test test/serial-input.test.js",
     "test:tracked-bills": "node --test test/tracked-bill-state.test.js",
     "test:appcheck": "node --test test/appcheck.test.js",
-    "test:ocr": "node --test test/ocr-parser.test.js"
+    "test:ocr": "node --test test/ocr-parser.test.js",
+    "test:backup": "node test/run-backup-emulators.mjs",
+    "backup:emulator": "node scripts/backup/firestore-backup.mjs"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
@@ -36,6 +38,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "firebase-admin": "^14.5.0",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
