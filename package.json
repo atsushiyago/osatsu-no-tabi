@@ -14,6 +14,7 @@
     "test:rules": "firebase --config firebase.json emulators:exec --only firestore,auth \"node test/strict-rules.runner.cjs\"",
     "test:rules:strict": "firebase --config firebase.strict.json emulators:exec --only firestore,auth \"node test/strict-rules.runner.cjs\"",
     "test:rules:v2": "node test/run-identity-emulators.mjs",
+    "test:google-merge": "node test/run-google-account-merge-emulator.mjs",
     "test:auth": "node --test test/anonymous-session.test.js",
     "test:serial-input": "node --test test/serial-input.test.js",
     "test:tracked-bills": "node --test test/tracked-bill-state.test.js",

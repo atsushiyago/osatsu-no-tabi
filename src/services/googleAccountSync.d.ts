@@ -13,8 +13,17 @@ export function syncGoogleAccount(options: {
   onUserSwitched?: (user: User) => void;
   countTrackedBills: (uid: string) => Promise<number>;
   confirmSwitch: (trackedBillCount: number) => boolean;
+  onStage?: (stage: string) => void;
+  handleExistingAccount?: (input: {
+    credential: AuthCredential | null;
+    previousUid: string;
+  }) => Promise<{
+    status: 'cancelled' | 'switched' | 'popup-fallback' | 'merged';
+    previousUid: string;
+    uid: string;
+  }>;
 }): Promise<{
-  status: 'linked' | 'cancelled' | 'switched' | 'popup-fallback';
+  status: 'linked' | 'cancelled' | 'switched' | 'popup-fallback' | 'merged';
   previousUid: string;
   uid: string;
 }>;

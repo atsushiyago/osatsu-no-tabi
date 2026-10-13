@@ -21,9 +21,12 @@ export async function syncGoogleAccount({
   onUserSwitched,
   countTrackedBills,
   confirmSwitch,
+  handleExistingAccount,
+  onStage,
 }) {
   const anonymousUid = user.uid;
   try {
+    onStage?.('link-popup');
     const linkedUser = await link(user, provider);
     if (linkedUser.uid !== anonymousUid) {
       throw new Error('Google link unexpectedly changed the Firebase UID');
@@ -34,7 +37,12 @@ export async function syncGoogleAccount({
       throw error;
     }
 
+    onStage?.('collision-credential-extraction');
     const credential = getCredentialFromError(error);
+    onStage?.(credential ? 'collision-credential-ready' : 'collision-credential-missing');
+    if (handleExistingAccount) {
+      return handleExistingAccount({ credential, previousUid: anonymousUid });
+    }
     let trackedBillCount;
     try {
       trackedBillCount = await countTrackedBills(anonymousUid);
@@ -65,5 +73,10 @@ export function getGoogleSyncErrorMessage(error, language = 'ja') {
   if (code === 'auth/operation-not-allowed') return translate(language, 'googleNotEnabled');
   if (code === 'auth/unauthorized-domain') return translate(language, 'googleUnauthorizedDomain');
   if (code === 'auth/tracked-bills-check-failed') return translate(language, 'googleTrackedBillsCheckFailed');
+  if (code === 'merge/check-failed') return translate(language, 'mergeCheckError');
+  if (code === 'unavailable') return translate(language, 'googleNetworkError');
+  if (code === 'merge/active-for-another-account') return translate(language, 'mergeActiveOther');
+  if (code === 'merge/source-changed') return translate(language, 'mergeSourceChanged');
+  if (code === 'merge/failed') return translate(language, 'mergeFailed');
   return translate(language, 'googleGenericError');
 }

@@ -10,7 +10,7 @@ export function pausedIdentityRules(source) {
     [/allow create: if request.auth != null && validSighting\(id\);/, 'allow create: if false;'],
     [/allow create: if request.auth != null && request.auth.uid == uid\s*&& validRateFields\(request.resource.data\) && initialRate\(request.resource.data\)\s*&& validRateOperation\(request.resource.data\);/, 'allow create: if false;'],
     [/allow update: if request.auth != null && request.auth.uid == uid\s*&& validRateFields\(request.resource.data\) && advanceRate\(resource.data, request.resource.data\)\s*&& validRateOperation\(request.resource.data\);/, 'allow update: if false;'],
-    [/allow create: if request.auth != null && request.auth.uid == uid && validTrackedCreate\(id\);/, 'allow create: if false;'],
+    [/allow create: if request.auth != null && request.auth.uid == uid\s*&& \(validTrackedCreate\(id\) \|\| validMergeTrackedCreate\(uid, id\)\);/, 'allow create: if false;'],
     [/&& resource.data.publicBillId == id && validTrackedUpdate\(id\);/, '&& resource.data.publicBillId == id && metadataUpdate(request.resource.data, resource.data, get(/databases/$(database)/documents/publicBills/$(id)).data);'],
   ];
   let paused = source;

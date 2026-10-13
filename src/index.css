@@ -301,6 +301,10 @@ body {
 .tracked-bills-sync button:disabled { opacity: 0.65; cursor: wait; }
 .tracked-bills-sync-fallback { grid-column: 1 / -1; display: grid; justify-items: start; gap: 8px; }
 .tracked-bills-sync .tracked-bills-sync-error { grid-column: 1 / -1; color: #9f3b2f; }
+.tracked-bills-sync .tracked-bills-sync-diagnostic { grid-column: 1 / -1; color: #647066; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.tracked-bills-sync .tracked-bills-merge-progress { grid-column: 1 / -1; color: #365d4a; }
+.tracked-bills-sync > button + .tracked-bills-merge-progress,
+.tracked-bills-sync .tracked-bills-merge-progress + button { justify-self: start; white-space: normal; }
 .tracked-bills-sync-linked { display: block; }
 @media (max-width: 380px) {
   .tracked-bills-sync { grid-template-columns: 1fr; }

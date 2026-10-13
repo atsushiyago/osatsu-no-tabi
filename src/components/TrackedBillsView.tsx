@@ -8,6 +8,7 @@ import {
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 import { useI18n } from '../useI18n';
 import { getLocalizedPlaceName, getLocalizedLocationLabel } from '../utils/geo';
+import type { TrackedBillMergeProgress } from '../services/trackedBillMerge';
 
 interface TrackedBillsViewProps {
   uid: string;
@@ -21,6 +22,10 @@ interface TrackedBillsViewProps {
   onGoogleSync: () => void;
   popupFallbackAvailable: boolean;
   onGooglePopupFallback: () => void;
+  syncDiagnostic: { stage: string; code: string | null; transport: string } | null;
+  mergeProgress: TrackedBillMergeProgress | null;
+  mergeResumeAvailable: boolean;
+  onGoogleMergeResume: () => void;
 }
 
 export function TrackedBillsView({
@@ -35,6 +40,10 @@ export function TrackedBillsView({
   onGoogleSync,
   popupFallbackAvailable,
   onGooglePopupFallback,
+  syncDiagnostic,
+  mergeProgress,
+  mergeResumeAvailable,
+  onGoogleMergeResume,
 }: TrackedBillsViewProps) {
   const { language, t, number, date, yen } = useI18n();
   const [rows, setRows] = useState<TrackedBillRow[]>([]);
@@ -152,7 +161,29 @@ export function TrackedBillsView({
               </button>
             </div>
           )}
+          {mergeProgress && (
+            <p className="tracked-bills-merge-progress" role="status" aria-live="polite">
+              {t('mergeProgress', {
+                copiedCount: number(mergeProgress.copiedCount),
+                totalCount: number(mergeProgress.totalCount),
+                duplicateCount: number(mergeProgress.duplicateCount),
+              })}{' '}
+              {t(mergeProgress.phase === 'preparing' ? 'mergePhasePreparing'
+                : mergeProgress.phase === 'copying' ? 'mergePhaseCopying' : 'mergePhaseFinishing')}
+            </p>
+          )}
+          {mergeResumeAvailable && !syncing && (
+            <button type="button" onClick={onGoogleMergeResume}>
+              {t('mergeResume')}
+            </button>
+          )}
           {syncError && <p className="tracked-bills-sync-error" role="alert">{syncError}</p>}
+          {syncDiagnostic && (
+            <small className="tracked-bills-sync-diagnostic" role="status" data-testid="google-sync-diagnostic">
+              Emulator diagnostic: {syncDiagnostic.stage}{syncDiagnostic.code ? ` · ${syncDiagnostic.code}` : ''}<br />
+              {syncDiagnostic.transport}
+            </small>
+          )}
         </section>
       )}
       {syncState === 'linked' && (

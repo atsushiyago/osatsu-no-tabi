@@ -5,7 +5,7 @@ import {
   getToken,
   type AppCheck,
 } from 'firebase/app-check';
-import { connectFirestoreEmulator, initializeFirestore, type Firestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore, initializeFirestore, type Firestore } from 'firebase/firestore';
 import { connectAuthEmulator, getAuth, signInAnonymously, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
 import { isDebugTiming } from '../utils/debug';
 import { getOrCreateAnonymousUser } from './anonymousSession.js';
@@ -148,6 +148,51 @@ export function observeAuthState(
   error: (reason: Error) => void
 ): (() => void) | null {
   return auth ? onAuthStateChanged(auth, next, error) : null;
+}
+
+let mergeContext: { auth: Auth; db: Firestore } | null = null;
+
+/**
+ * A separate Firebase App/Auth keeps the device's anonymous session intact while
+ * the user authenticates to an already-linked Google UID. It uses the same
+ * project and, in development, the same explicitly configured local emulators.
+ */
+export function getGoogleMergeContext(): { auth: Auth; db: Firestore } {
+  if (mergeContext) return mergeContext;
+  if (!app || !isFirebaseConfigured) throw new Error('Firebase is not configured');
+
+  const name = 'google-account-merge-secondary';
+  const existingSecondaryApp = getApps().find((item) => item.name === name);
+  const secondaryApp = existingSecondaryApp ?? initializeApp(app.options, name);
+  const secondaryAuth = getAuth(secondaryApp);
+  const secondaryDb = existingSecondaryApp
+    ? getFirestore(secondaryApp)
+    : initializeFirestore(secondaryApp, { experimentalForceLongPolling: true });
+
+  if (useFirebaseEmulators && !existingSecondaryApp) {
+    connectAuthEmulator(secondaryAuth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
+    connectFirestoreEmulator(secondaryDb, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
+  } else if (!useFirebaseEmulators && isAppCheckConfigured && typeof window !== 'undefined') {
+    // App Check is per Firebase App. Do not let a secondary Firestore request
+    // silently bypass an App Check-enforced production project.
+    try {
+      initializeAppCheck(secondaryApp, {
+        provider: new ReCaptchaEnterpriseProvider(recaptchaEnterpriseSiteKey),
+        isTokenAutoRefreshEnabled: true,
+      });
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'app-check/already-initialized') {
+        // Vite HMR can preserve the named Firebase App while reloading this module.
+      } else {
+      console.warn('Could not initialize App Check for the secondary Auth session.');
+      throw error;
+      }
+    }
+  }
+
+  mergeContext = { auth: secondaryAuth, db: secondaryDb };
+  return mergeContext;
 }
 
 /**

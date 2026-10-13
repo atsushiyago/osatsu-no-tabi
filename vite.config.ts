@@ -23,6 +23,8 @@ export default defineConfig(({ command }) => {
         '/v1/projects/demo-osatsu-public-serial/': { target: 'http://127.0.0.1:18080', changeOrigin: true },
         '/identitytoolkit.googleapis.com/': { target: 'http://127.0.0.1:19099', changeOrigin: true },
         '/securetoken.googleapis.com/': { target: 'http://127.0.0.1:19099', changeOrigin: true },
+        '/emulator/auth/iframe': { target: 'http://127.0.0.1:19099', changeOrigin: true },
+        '/emulator/auth/handler': { target: 'http://127.0.0.1:19099', changeOrigin: true },
         '/emulator/v1/projects/demo-osatsu-public-serial/config': { target: 'http://127.0.0.1:19099', changeOrigin: true },
       },
     } } : {}),

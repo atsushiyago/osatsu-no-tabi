@@ -48,15 +48,152 @@ service cloud.firestore {
     }
     match /users/{uid}/trackedBills/{id} {
       allow read: if request.auth != null && request.auth.uid == uid;
-      allow create: if request.auth != null && request.auth.uid == uid && validTrackedCreate(id);
+      allow create: if request.auth != null && request.auth.uid == uid
+        && (validTrackedCreate(id) || validMergeTrackedCreate(uid, id));
       allow update: if request.auth != null && request.auth.uid == uid
-        && resource.data.publicBillId == id && validTrackedUpdate(id);
+        && !activeMergeLock(uid) && resource.data.publicBillId == id && validTrackedUpdate(id);
       allow delete: if false;
+    }
+    // A short-lived, user-consented merge uses two authenticated users: the Google
+    // account creates an immutable ticket; the source anonymous user creates an
+    // exact snapshot of each record. No public bill, sighting, or identity is changed.
+    match /users/{targetUid}/trackedBillMergeTickets/{ticketId} {
+      allow get: if request.auth != null
+        && (request.auth.uid == targetUid || resource.data.sourceUid == request.auth.uid);
+      allow list: if request.auth != null && request.auth.uid == targetUid;
+      allow create: if request.auth != null && request.auth.uid == targetUid && googleUser()
+        && !activeMergeLock(targetUid) && validMergeTicketCreate(targetUid, request.resource.data);
+      allow update: if request.auth != null && request.auth.uid == targetUid && googleUser()
+        && resource.data.status == 'open'
+        && ((request.resource.data.status == 'complete'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'completedAt'])
+            && request.resource.data.completedAt == request.time)
+          || (request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.cancelledAt == request.time));
+      allow delete: if request.auth != null && request.auth.uid == targetUid
+        && (resource.data.status in ['complete', 'cancelled'] || request.time >= resource.data.expiresAt);
+    }
+    match /users/{sourceUid}/trackedBillMergeLocks/active {
+      allow get: if request.auth != null
+        && (request.auth.uid == sourceUid || request.auth.uid == resource.data.targetUid);
+      allow list: if false;
+      allow create: if request.auth != null && request.auth.uid == sourceUid
+        && validMergeLock(sourceUid, request.resource.data);
+      allow update: if request.auth != null && request.auth.uid == sourceUid
+        && resource.data.expiresAt <= request.time && validMergeLock(sourceUid, request.resource.data);
+      allow delete: if request.auth != null
+        && (request.auth.uid == sourceUid || request.auth.uid == resource.data.targetUid)
+        && mergeTicketFinished(resource.data.targetUid, resource.data.ticketId);
+    }
+    match /users/{sourceUid}/trackedBillMergeExports/{ticketId}/items/{billId} {
+      allow get, list: if request.auth != null
+        && (request.auth.uid == sourceUid || validMergeExportRead(sourceUid, ticketId));
+      allow create: if request.auth != null && request.auth.uid == sourceUid
+        && validMergeExportCreate(sourceUid, ticketId, billId);
+      allow delete: if request.auth != null
+        && (request.auth.uid == sourceUid || request.auth.uid == resource.data.targetUid)
+        && mergeTicketFinished(resource.data.targetUid, ticketId);
+      allow update: if false;
+    }
+    match /users/{targetUid}/trackedBillMergeImports/{billId} {
+      allow get, list: if request.auth != null && request.auth.uid == targetUid;
+      allow create: if request.auth != null && request.auth.uid == targetUid && googleUser()
+        && validMergeMarker(targetUid, billId);
+      allow delete: if request.auth != null && request.auth.uid == targetUid;
+      allow update: if false;
     }
     match /{document=**} { allow read, write: if false; }
 
     function opaque(id) {
       return id is string && id.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
+    function googleUser() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function mergeTicketPath(targetUid, ticketId) {
+      return /databases/$(database)/documents/users/$(targetUid)/trackedBillMergeTickets/$(ticketId);
+    }
+    function mergeLockPath(uid) {
+      return /databases/$(database)/documents/users/$(uid)/trackedBillMergeLocks/active;
+    }
+    function mergeExportPath(sourceUid, ticketId, billId) {
+      return /databases/$(database)/documents/users/$(sourceUid)/trackedBillMergeExports/$(ticketId)/items/$(billId);
+    }
+    function mergeTrackedPath(sourceUid, billId) {
+      return /databases/$(database)/documents/users/$(sourceUid)/trackedBills/$(billId);
+    }
+    function activeMergeLock(uid) {
+      let path = mergeLockPath(uid);
+      return exists(path) && get(path).data.expiresAt is timestamp && request.time < get(path).data.expiresAt;
+    }
+    function validMergeTicketCreate(targetUid, data) {
+      return data.keys().hasOnly(['sourceUid', 'targetUid', 'createdAt', 'expiresAt', 'totalCount', 'status'])
+        && data.keys().hasAll(['sourceUid', 'targetUid', 'createdAt', 'expiresAt', 'totalCount', 'status'])
+        && data.sourceUid is string && data.sourceUid != targetUid && data.targetUid == targetUid
+        && data.createdAt == request.time && data.expiresAt is timestamp
+        && request.time < data.expiresAt && data.expiresAt <= request.time + duration.value(30, 'm')
+        && data.totalCount is int && data.totalCount >= 0 && data.totalCount <= 10000
+        && data.status == 'open';
+    }
+    function validMergeTicket(targetUid, sourceUid, ticketId) {
+      let path = mergeTicketPath(targetUid, ticketId);
+      return exists(path) && get(path).data.targetUid == targetUid
+        && get(path).data.sourceUid == sourceUid && get(path).data.status == 'open'
+        && request.time < get(path).data.expiresAt;
+    }
+    function mergeTicketFinished(targetUid, ticketId) {
+      let path = mergeTicketPath(targetUid, ticketId);
+      return (exists(path) && get(path).data.status in ['complete', 'cancelled'])
+        || (exists(path) && request.time >= get(path).data.expiresAt);
+    }
+    function validMergeLock(sourceUid, data) {
+      let ticketPath = mergeTicketPath(data.targetUid, data.ticketId);
+      return data.keys().hasOnly(['sourceUid', 'targetUid', 'ticketId', 'expiresAt'])
+        && data.keys().hasAll(['sourceUid', 'targetUid', 'ticketId', 'expiresAt'])
+        && data.sourceUid == sourceUid && data.targetUid is string && data.targetUid != sourceUid
+        && data.ticketId is string && data.expiresAt is timestamp && request.time < data.expiresAt
+        && validMergeTicket(data.targetUid, sourceUid, data.ticketId)
+        && get(ticketPath).data.expiresAt == data.expiresAt;
+    }
+    function validMergeExportCreate(sourceUid, ticketId, billId) {
+      let data = request.resource.data;
+      let trackedPath = mergeTrackedPath(sourceUid, billId);
+      return data.keys().hasOnly(['sourceUid', 'targetUid', 'publicBillId', 'tracked', 'createdAt'])
+        && data.keys().hasAll(['sourceUid', 'targetUid', 'publicBillId', 'tracked', 'createdAt'])
+        && data.sourceUid == sourceUid && data.targetUid is string && data.publicBillId == billId
+        && data.createdAt == request.time && exists(trackedPath)
+        && data.tracked == get(trackedPath).data && trackedFields(data.tracked)
+        && validMergeTicket(data.targetUid, sourceUid, ticketId)
+        && activeMergeLock(sourceUid)
+        && get(mergeLockPath(sourceUid)).data.ticketId == ticketId
+        && get(mergeLockPath(sourceUid)).data.targetUid == data.targetUid;
+    }
+    function validMergeExportRead(sourceUid, ticketId) {
+      let path = mergeTicketPath(resource.data.targetUid, ticketId);
+      return googleUser() && request.auth.uid == resource.data.targetUid
+        && exists(path) && get(path).data.sourceUid == sourceUid
+        && ((get(path).data.status == 'open' && request.time < get(path).data.expiresAt)
+          || get(path).data.status == 'complete');
+    }
+    function validMergeMarker(targetUid, billId) {
+      let data = request.resource.data;
+      let exportPath = mergeExportPath(data.sourceUid, data.ticketId, billId);
+      return data.keys().hasOnly(['sourceUid', 'targetUid', 'ticketId', 'publicBillId', 'createdAt'])
+        && data.keys().hasAll(['sourceUid', 'targetUid', 'ticketId', 'publicBillId', 'createdAt'])
+        && data.sourceUid is string && data.targetUid == targetUid && data.publicBillId == billId
+        && data.ticketId is string && data.createdAt == request.time && exists(exportPath)
+        && validMergeTicket(targetUid, data.sourceUid, data.ticketId)
+        && get(exportPath).data.targetUid == targetUid;
+    }
+    function validMergeTrackedCreate(targetUid, billId) {
+      let markerPath = /databases/$(database)/documents/users/$(targetUid)/trackedBillMergeImports/$(billId);
+      let marker = getAfter(markerPath).data;
+      let exportPath = mergeExportPath(marker.sourceUid, marker.ticketId, billId);
+      return googleUser() && marker.targetUid == targetUid && marker.publicBillId == billId
+        && validMergeTicket(targetUid, marker.sourceUid, marker.ticketId)
+        && exists(exportPath) && get(exportPath).data.tracked == request.resource.data
+        && trackedFields(request.resource.data);
     }
     function validSerial(serial) {
       return serial is string && (
@@ -211,7 +348,8 @@ service cloud.firestore {
       let bill = getAfter(billPath).data;
       let reverse = getAfter(/databases/$(database)/documents/billIdentities/$(id)).data;
       let d = request.resource.data;
-      return opaque(id) && d.createdAt == request.time && trackedOperation(id, d, bill, reverse)
+      return opaque(id) && !activeMergeLock(request.auth.uid)
+        && d.createdAt == request.time && trackedOperation(id, d, bill, reverse)
         && (existed ? (!d.firstRegisteredByMe && bill.sightingsCount == get(billPath).data.sightingsCount + 1) : d.firstRegisteredByMe);
     }
     function metadataUpdate(d, before, priorBill) {

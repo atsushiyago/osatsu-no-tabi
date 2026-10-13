@@ -66,6 +66,26 @@ test('credential-already-in-use uses the first popup credential and does not cal
   assert.deepEqual(result, { status: 'switched', previousUid: 'anonymous-uid', uid: 'google-uid' });
 });
 
+test('sync diagnostics report auth collision and credential extraction stages without exposing credential data', async () => {
+  const stages = [];
+  const credential = { idToken: 'must-not-be-logged' };
+  await syncGoogleAccount({
+    user: { uid: 'anonymous-uid', isAnonymous: true },
+    provider: {},
+    link: async () => { throw { code: 'auth/credential-already-in-use' }; },
+    getCredentialFromError: () => credential,
+    handleExistingAccount: async ({ credential: received }) => {
+      assert.equal(received, credential);
+      return { status: 'popup-fallback', previousUid: 'anonymous-uid', uid: 'anonymous-uid' };
+    },
+    onStage: (stage) => stages.push(stage),
+    countTrackedBills: async () => 0,
+    confirmSwitch: () => true,
+  });
+  assert.deepEqual(stages, ['link-popup', 'collision-credential-extraction', 'collision-credential-ready']);
+  assert.ok(stages.every((stage) => !stage.includes('must-not-be-logged')));
+});
+
 test('existing local bills require confirmation before signInWithCredential', async () => {
   const user = { uid: 'anonymous-uid', isAnonymous: true };
   let signInCalls = 0;
