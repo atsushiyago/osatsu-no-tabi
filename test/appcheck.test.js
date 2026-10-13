@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 // Polyfill import.meta.env for test runner outside Vite
@@ -32,4 +33,20 @@ test('App Check provider exports and initialization order', async () => {
   // Verify constructor works
   const provider = new ReCaptchaEnterpriseProvider('dummy-test-key');
   assert.ok(provider);
+});
+
+test('secondary App Check is initialized before secondary Auth and Firestore services', async () => {
+  const source = await readFile(new URL('../src/services/firebase.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('export function getGoogleMergeContext()');
+  const end = source.indexOf('\n}\n', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const mergeContext = source.slice(start, end);
+  const appCheckIndex = mergeContext.indexOf('initializeAppCheck(secondaryApp');
+  const authIndex = mergeContext.indexOf('getAuth(secondaryApp)');
+  const firestoreIndex = mergeContext.indexOf('initializeFirestore(secondaryApp');
+
+  assert.notEqual(appCheckIndex, -1);
+  assert.ok(authIndex > appCheckIndex);
+  assert.ok(firestoreIndex > appCheckIndex);
 });

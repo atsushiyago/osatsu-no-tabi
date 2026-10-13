@@ -176,15 +176,8 @@ export function getGoogleMergeContext(): { auth: Auth; db: Firestore } {
   const name = 'google-account-merge-secondary';
   const existingSecondaryApp = getApps().find((item) => item.name === name);
   const secondaryApp = existingSecondaryApp ?? initializeApp(app.options, name);
-  const secondaryAuth = getAuth(secondaryApp);
-  const secondaryDb = existingSecondaryApp
-    ? getFirestore(secondaryApp)
-    : initializeFirestore(secondaryApp, { experimentalForceLongPolling: true });
-
-  if (import.meta.env.DEV && useFirebaseEmulators && !existingSecondaryApp) {
-    connectAuthEmulator(secondaryAuth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
-    connectFirestoreEmulator(secondaryDb, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
-  } else if (!useFirebaseEmulators && isAppCheckConfigured && typeof window !== 'undefined') {
+  // App Check must be activated before creating/using secondary Firebase services.
+  if (!useFirebaseEmulators && isAppCheckConfigured && typeof window !== 'undefined') {
     // App Check is per Firebase App. Do not let a secondary Firestore request
     // silently bypass an App Check-enforced production project.
     try {
@@ -201,6 +194,16 @@ export function getGoogleMergeContext(): { auth: Auth; db: Firestore } {
       throw error;
       }
     }
+  }
+
+  const secondaryAuth = getAuth(secondaryApp);
+  const secondaryDb = existingSecondaryApp
+    ? getFirestore(secondaryApp)
+    : initializeFirestore(secondaryApp, { experimentalForceLongPolling: true });
+
+  if (import.meta.env.DEV && useFirebaseEmulators && !existingSecondaryApp) {
+    connectAuthEmulator(secondaryAuth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
+    connectFirestoreEmulator(secondaryDb, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
   }
 
   mergeContext = { auth: secondaryAuth, db: secondaryDb };
