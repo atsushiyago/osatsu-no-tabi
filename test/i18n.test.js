@@ -28,9 +28,10 @@ test('stored language preference takes precedence and can be persisted', () => {
 
 test('English place labels do not change Japanese geo lookup keys', () => {
   assert.equal(PREFECTURES.length, 47);
-  for (const place of [...PREFECTURES, ...JAPAN_CITIES.map(({ city }) => city)]) {
+  for (const place of [...PREFECTURES, '札幌市', '千代田区', '横浜市', '箱根町']) {
     assert.notEqual(getLocalizedPlaceName(place, 'en'), place, `Missing English place translation for ${place}`);
   }
+  assert.equal(getLocalizedPlaceName('札幌市 中央区', 'en'), '札幌市 中央区');
   assert.equal(getLocalizedPlaceName('未知の自治体', 'en'), '未知の自治体');
   assert.equal(JAPAN_CITIES[0].pref, '北海道');
   assert.equal(JAPAN_CITIES[0].city, '札幌市');

@@ -22,7 +22,9 @@ import {
   getCitiesByPrefecture,
   findNearestCity,
   getLocalizedPlaceName,
-  type CityLocation,
+  EMPTY_LOCATION_SELECTION,
+  selectPrefecture,
+  isMunicipalitySelectionValid,
 } from '../utils/geo';
 import {
   normalizeSerialNumber,
@@ -76,11 +78,10 @@ export const RegisterView = ({
   } = useSerialInput(initialSerial, language);
   const [confirmedIdentitySerial, setConfirmedIdentitySerial] = useState<string | null>(null);
   const [isSerialFocused, setIsSerialFocused] = useState(false);
-  const [selectedPref, setSelectedPref] = useState('東京都');
-  const [selectedCity, setSelectedCity] = useState('千代田区');
+  const [selectedPref, setSelectedPref] = useState<string>(EMPTY_LOCATION_SELECTION.prefecture);
+  const [selectedCity, setSelectedCity] = useState<string>(EMPTY_LOCATION_SELECTION.municipality);
   const [userNote, setUserNote] = useState('');
   
-  const [availableCities, setAvailableCities] = useState<CityLocation[]>([]);
   const [locating, setLocating] = useState(false);
   const [locatingMessage, setLocatingMessage] = useState<LocalizedMessage | null>(null);
   
@@ -254,14 +255,7 @@ export const RegisterView = ({
     setPendingImageFile(null);
   };
 
-  // 都道府県が変更されたら市区町村リストを更新
-  useEffect(() => {
-    const cities = getCitiesByPrefecture(selectedPref);
-    setAvailableCities(cities);
-    if (cities.length > 0 && !cities.some((c) => c.city === selectedCity)) {
-      setSelectedCity(cities[0].city);
-    }
-  }, [selectedPref]);
+  const availableCities = getCitiesByPrefecture(selectedPref);
 
   const identityStage = registrationIdentityStage({ denomination, series, serialColor }, serialInput, confirmedIdentitySerial, isSerialFocused, isSerialComposing);
   const identitySelection = identityStage.selection;
@@ -349,6 +343,11 @@ export const RegisterView = ({
     const valResult = validateSerialNumber(serialInput, language);
     if (!valResult.isValid) {
       setErrorMessage({ text: valResult.message || t('serialCheckFirst'), language });
+      return;
+    }
+
+    if (!isMunicipalitySelectionValid(selectedPref, selectedCity)) {
+      setErrorKey('locationRequired');
       return;
     }
 
@@ -837,9 +836,14 @@ export const RegisterView = ({
                 className="text-input"
                 style={{ padding: '10px', fontSize: '14px' }}
                 value={selectedPref}
-                onChange={(e) => setSelectedPref(e.target.value)}
+                onChange={(e) => {
+                  const nextLocation = selectPrefecture(e.target.value);
+                  setSelectedPref(nextLocation.prefecture);
+                  setSelectedCity(nextLocation.municipality);
+                }}
                 id="select-pref"
               >
+                <option value="">{t('selectPrefecture')}</option>
                 {PREFECTURES.map((pref) => (
                   <option key={pref} value={pref}>
                     {getLocalizedPlaceName(pref, language)}
@@ -857,8 +861,10 @@ export const RegisterView = ({
                 style={{ padding: '10px', fontSize: '14px' }}
                 value={selectedCity}
                 onChange={(e) => setSelectedCity(e.target.value)}
+                disabled={!selectedPref}
                 id="select-city"
               >
+                <option value="">{t('selectMunicipality')}</option>
                 {availableCities.map((c) => (
                   <option key={c.city} value={c.city}>
                     {getLocalizedPlaceName(c.city, language)}
