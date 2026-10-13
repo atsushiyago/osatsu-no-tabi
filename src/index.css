@@ -263,9 +263,10 @@ body {
 .tracked-bills-note, .tracked-bills-unavailable p {
   margin: 0 0 18px;
   color: #5d635d;
-  font-size: 13px;
   line-height: 1.65;
 }
+.tracked-bills-note { font-size: 15px; }
+.tracked-bills-unavailable p { font-size: 13px; }
 .tracked-bills-sync {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
