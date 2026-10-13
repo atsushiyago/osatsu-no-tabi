@@ -1,7 +1,6 @@
 import {
   collection,
   doc,
-  getCountFromServer,
   getDoc,
   getDocs,
   limit,
@@ -16,6 +15,7 @@ import {
   type QueryDocumentSnapshot,
   type Timestamp,
 } from 'firebase/firestore';
+import { countTrackedBillDocuments } from './trackedBillCount.js';
 import { db } from './firebase';
 import type { BillWithSightings } from '../types';
 import { getPublicBillById } from './billService';
@@ -117,9 +117,7 @@ export async function getTrackedBillsPage(
 export async function getTrackedBillsCount(uid: string): Promise<number> {
   const firestore = db;
   if (!firestore) throw new Error('Firestore is unavailable');
-  const trackedRef = collection(firestore, 'users', uid, 'trackedBills');
-  const snapshot = await getCountFromServer(query(trackedRef, where('firstRegisteredByMe', '==', true)));
-  return snapshot.data().count;
+  return countTrackedBillDocuments(firestore, uid);
 }
 
 /** Called after the public bill detail and journey history have rendered. */

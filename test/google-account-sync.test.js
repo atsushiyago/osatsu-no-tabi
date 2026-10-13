@@ -110,6 +110,45 @@ test('existing local bills switch with signInWithCredential only after confirmat
   assert.equal(result.status, 'switched');
 });
 
+test('a tracked bill not first registered by this UID still requires confirmation', async () => {
+  const user = { uid: 'anonymous-uid', isAnonymous: true };
+  let confirmationCount = 0;
+  let signInCalls = 0;
+  const result = await syncGoogleAccount({
+    user,
+    provider: {},
+    link: async () => { throw { code: 'auth/credential-already-in-use' }; },
+    getCredentialFromError: () => ({ idToken: 'credential' }),
+    signInWithCredential: async () => { signInCalls += 1; return { uid: 'google-uid' }; },
+    countTrackedBills: async () => 1,
+    confirmSwitch: (count) => { confirmationCount = count; return false; },
+  });
+
+  assert.equal(confirmationCount, 1);
+  assert.equal(signInCalls, 0);
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.uid, user.uid);
+});
+
+test('tracked bill count failure blocks account switching without confirmation', async () => {
+  const user = { uid: 'anonymous-uid', isAnonymous: true };
+  let signInCalls = 0;
+  let confirmationCalls = 0;
+  await assert.rejects(syncGoogleAccount({
+    user,
+    provider: {},
+    link: async () => { throw { code: 'auth/credential-already-in-use' }; },
+    getCredentialFromError: () => ({ idToken: 'credential' }),
+    signInWithCredential: async () => { signInCalls += 1; return { uid: 'google-uid' }; },
+    countTrackedBills: async () => { throw new Error('network unavailable'); },
+    confirmSwitch: () => { confirmationCalls += 1; return true; },
+  }), { code: 'auth/tracked-bills-check-failed' });
+
+  assert.equal(signInCalls, 0);
+  assert.equal(confirmationCalls, 0);
+  assert.equal(user.uid, 'anonymous-uid');
+});
+
 test('account collision with zero local bills switches with signInWithCredential', async () => {
   let signInCalls = 0;
   const credential = { idToken: 'credential' };

@@ -8,6 +8,7 @@ import {
 import { GoogleAuthProvider, linkWithCredential, signInWithCredential } from 'firebase/auth';
 import { BANKNOTE_VARIANTS } from '../src/data/banknoteVariants.ts';
 import { registerBillIdentityV2InEmulator } from '../src/services/billIdentityRegistry.ts';
+import { countTrackedBillDocuments } from '../src/services/trackedBillCount.js';
 import { projectPublicBill } from '../src/utils/publicBillPagination.js';
 import {
   client, adminSet, adminGet, adminDelete, ageBill, resetRate, plan, commit, opaque,
@@ -141,6 +142,12 @@ test('v2 identity integrity on isolated Firestore/Auth emulators', async (t) => 
     assert.equal(again.status, 'rediscovered');
     assert.equal(again.sightingsCount, 3);
     assert.equal((await adminGet(`users/${owner.uid}/trackedBills/${base.publicBillId}`)).firstRegisteredByMe, true);
+  });
+
+  await t.test('account-switch protection counts rediscovery-only tracked records', async () => {
+    const tracked = await adminGet(`users/${other.uid}/trackedBills/${base.publicBillId}`);
+    assert.equal(tracked.firstRegisteredByMe, false);
+    assert.equal(await countTrackedBillDocuments(other.db, other.uid), 1);
   });
 
   // Enumerate all 62 nonempty proper subsets, not just six single omissions.

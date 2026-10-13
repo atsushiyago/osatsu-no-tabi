@@ -35,7 +35,14 @@ export async function syncGoogleAccount({
     }
 
     const credential = getCredentialFromError(error);
-    const trackedBillCount = await countTrackedBills(anonymousUid);
+    let trackedBillCount;
+    try {
+      trackedBillCount = await countTrackedBills(anonymousUid);
+    } catch {
+      const error = new Error('Could not verify tracked bills before switching accounts');
+      error.code = 'auth/tracked-bills-check-failed';
+      throw error;
+    }
     if (trackedBillCount > 0 && !confirmSwitch(trackedBillCount)) {
       return { status: 'cancelled', previousUid: anonymousUid, uid: anonymousUid };
     }
@@ -57,5 +64,6 @@ export function getGoogleSyncErrorMessage(error, language = 'ja') {
   if (code === 'auth/network-request-failed') return translate(language, 'googleNetworkError');
   if (code === 'auth/operation-not-allowed') return translate(language, 'googleNotEnabled');
   if (code === 'auth/unauthorized-domain') return translate(language, 'googleUnauthorizedDomain');
+  if (code === 'auth/tracked-bills-check-failed') return translate(language, 'googleTrackedBillsCheckFailed');
   return translate(language, 'googleGenericError');
 }
