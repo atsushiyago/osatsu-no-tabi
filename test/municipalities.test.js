@@ -14,10 +14,18 @@ import { translate } from '../src/i18n.ts';
 
 test('bundled municipality data covers every prefecture, municipality, and designated-city ward', () => {
   assert.equal(PREFECTURES.length, 47);
-  assert.equal(JAPAN_CITIES.length, 1916);
-  assert.equal(JAPAN_MUNICIPALITY_ROWS.length, 1916);
-  assert.equal(new Set(JAPAN_MUNICIPALITY_ROWS.map((row) => row[4])).size, 1916);
+  assert.equal(JAPAN_CITIES.length, 1912);
+  assert.equal(JAPAN_MUNICIPALITY_ROWS.length, 1912);
+  assert.equal(new Set(JAPAN_MUNICIPALITY_ROWS.map((row) => row[4])).size, 1912);
   assert.ok(JAPAN_CITIES.every(({ lat, lng, city, pref }) => Number.isFinite(lat) && Number.isFinite(lng) && city && pref));
+
+  for (const [, , , , code] of JAPAN_MUNICIPALITY_ROWS) {
+    assert.match(code, /^\d{6}$/);
+    const weightedSum = [...code.slice(0, 5)].reduce((sum, digit, index) => sum + Number(digit) * (6 - index), 0);
+    const rawCheckDigit = 11 - (weightedSum % 11);
+    const expectedCheckDigit = rawCheckDigit === 10 ? 0 : rawCheckDigit === 11 ? 1 : rawCheckDigit;
+    assert.equal(Number(code[5]), expectedCheckDigit, `invalid local-government code check digit: ${code}`);
+  }
 
   const kanagawa = getCitiesByPrefecture('神奈川県');
   assert.equal(kanagawa.length, 61);
@@ -30,6 +38,17 @@ test('bundled municipality data covers every prefecture, municipality, and desig
   assert.equal(tokyo.filter(({ city }) => city.endsWith('区') && !city.includes(' ')).length, 23);
   assert.ok(getCitiesByPrefecture('北海道').some(({ city }) => city === '稚内市'));
   assert.ok(getCitiesByPrefecture('沖縄県').some(({ city }) => city === '与那国町'));
+});
+
+test('Hamamatsu contains only the current three wards and current local-government codes', () => {
+  const hamamatsu = JAPAN_MUNICIPALITY_ROWS.filter(([pref, city]) => pref === '静岡県' && city.startsWith('浜松市'));
+  assert.deepEqual(hamamatsu.map(([, city, , , code]) => [city, code]), [
+    ['浜松市', '221309'],
+    ['浜松市 中央区', '221384'],
+    ['浜松市 浜名区', '221392'],
+    ['浜松市 天竜区', '221406'],
+  ]);
+  assert.equal(hamamatsu.some(([, city]) => /中区|東区|西区|南区|北区|浜北区/.test(city)), false);
 });
 
 test('prefecture filtering changes candidates without selecting a municipality', () => {

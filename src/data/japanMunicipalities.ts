@@ -1,6 +1,6 @@
 // Municipality names and local-government office representative points.
 // Source: code4fukui/localgovjp (CC0), based on GSI/J-LIS public data; fetched 2026-10-14.
-// Local-government codes in this source were last refreshed on 2021-11-01; review against the current e-Stat/MLIT lists when updating.
+// Local-government codes in this source were last refreshed on 2021-11-01. Hamamatsu ward names/codes are corrected below against e-Stat and Hamamatsu City's 2024 reorganization records (checked 2026-10-14).
 // Rows are [prefecture, municipality, latitude, longitude, local-government code].
 export type MunicipalityRow = readonly [string, string, number, number, string];
 
@@ -1026,13 +1026,9 @@ export const JAPAN_MUNICIPALITY_ROWS: readonly MunicipalityRow[] = [
   ["静岡県", "静岡市 駿河区", 34.96055556, 138.4041667, "221023"],
   ["静岡県", "静岡市 清水区", 35.01583333, 138.4897222, "221031"],
   ["静岡県", "浜松市", 34.71083333, 137.7266667, "221309"],
-  ["静岡県", "浜松市 中区", 34.71111111, 137.7266667, "221317"],
-  ["静岡県", "浜松市 東区", 34.74138889, 137.7916667, "221325"],
-  ["静岡県", "浜松市 西区", 34.69277778, 137.6452778, "221333"],
-  ["静岡県", "浜松市 南区", 34.66722222, 137.7522222, "221341"],
-  ["静岡県", "浜松市 北区", 34.80611111, 137.6511111, "221350"],
-  ["静岡県", "浜松市 浜北区", 34.79305556, 137.79, "221368"],
-  ["静岡県", "浜松市 天竜区", 34.87277778, 137.8161111, "221376"],
+  ["静岡県", "浜松市 中央区", 34.71111111, 137.7266667, "221384"],
+  ["静岡県", "浜松市 浜名区", 34.79305556, 137.79, "221392"],
+  ["静岡県", "浜松市 天竜区", 34.87277778, 137.8161111, "221406"],
   ["静岡県", "沼津市", 35.09555556, 138.8636111, "222038"],
   ["静岡県", "熱海市", 35.09611111, 139.0716667, "222054"],
   ["静岡県", "三島市", 35.11861111, 138.9186111, "222062"],
