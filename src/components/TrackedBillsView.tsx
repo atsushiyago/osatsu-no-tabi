@@ -352,7 +352,7 @@ export function TrackedBillsView({
       {!followingLoading && followingRows.length > 0 && (
         <section className="tracked-bills-following" aria-labelledby="tracked-bills-following-title">
           <h2 id="tracked-bills-following-title">{t('trackedFollowingTitle')}</h2>
-          <p>{t('trackedFollowingDescription')}</p>
+          <p className="tracked-bills-note">{t('trackedFollowingDescription')}</p>
           {followingError && <p role="alert">{t('trackedNextError')}</p>}
           <div className="tracked-bills-list" aria-label={t('trackedFollowingTitle')}>
             {followingRows.map((row) => renderBillCard(row, followingRows.length, 'following'))}

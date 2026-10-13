@@ -251,6 +251,7 @@ body {
 }
 
 .tracked-bills-view, .tracked-bills-unavailable { padding-bottom: 20px; }
+.tracked-bills-following { margin-top: 24px; }
 .public-bills-view { padding-bottom: 20px; }
 .tracked-bills-view h1, .tracked-bills-unavailable h1, .public-bills-view h1,
 .tracked-bills-following > h2 {
