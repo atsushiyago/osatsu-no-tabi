@@ -3,11 +3,21 @@ export function identityEmulatorEnabled(development: boolean, flag: unknown): bo
   return development && flag === 'true';
 }
 export const IDENTITY_EMULATOR_PROJECT = 'demo-osatsu-public-serial';
+export const QA_FIREBASE_PROJECT_ID = 'osatsu-no-tabi-qa';
 export const IDENTITY_FIRESTORE_PORT = 18080;
 export const IDENTITY_AUTH_PORT = 19099;
 
 /** Feature selection is independent of transport and defaults to off. */
 export function identityV2Enabled(flag: unknown): boolean { return flag === 'true'; }
+
+/** In QA mode, fail closed if the app points at any project or transport other than QA. */
+export function validQaFirebaseEnvironment(mode: unknown, projectId: unknown, emulatorFlag: unknown, v2Flag: unknown): boolean {
+  return mode !== 'qa' || (
+    projectId === QA_FIREBASE_PROJECT_ID &&
+    emulatorFlag !== 'true' &&
+    v2Flag === 'true'
+  );
+}
 
 export function validIdentityConnection(emulator: boolean, firestoreProject: unknown, authProject: unknown, authEmulatorHost?: string, expectedEmulatorHost = '127.0.0.1'): boolean {
   if (typeof firestoreProject !== 'string' || !firestoreProject || firestoreProject !== authProject) return false;

@@ -13,9 +13,13 @@ import { getOrCreateAnonymousUser } from './anonymousSession.js';
 import { identityEmulatorEndpoint, identityV2Enabled, identityEmulatorEnabled, IDENTITY_EMULATOR_PROJECT } from '../utils/identityEnvironment';
 
 export const useFirebaseEmulators = import.meta.env.DEV && identityEmulatorEnabled(true, import.meta.env.VITE_USE_FIREBASE_EMULATORS);
-export const emulatorEndpoint = identityEmulatorEndpoint(import.meta.env.DEV, import.meta.env.VITE_USE_FIREBASE_EMULATORS, import.meta.env.DEV ? import.meta.env.VITE_IDENTITY_LAN_HOST : undefined);
+// Keep emulator coordinates out of production bundles. Emulator transport is a
+// development-only capability, even when the selected build mode is QA.
+export const emulatorEndpoint = import.meta.env.DEV
+  ? identityEmulatorEndpoint(true, import.meta.env.VITE_USE_FIREBASE_EMULATORS, import.meta.env.VITE_IDENTITY_LAN_HOST)
+  : { host: '', firestorePort: 0, authPort: 0 };
 export const isIdentityV2Enabled = identityV2Enabled(import.meta.env.VITE_BILL_IDENTITY_V2);
-const firebaseConfig = useFirebaseEmulators ? {
+const firebaseConfig = import.meta.env.DEV && useFirebaseEmulators ? {
   apiKey: 'fake-api-key', projectId: IDENTITY_EMULATOR_PROJECT,
   authDomain: 'localhost', appId: 'demo-identity-v2',
 } : {
@@ -26,6 +30,14 @@ const firebaseConfig = useFirebaseEmulators ? {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
+if (import.meta.env.MODE === 'qa' && (
+  firebaseConfig.projectId !== 'osatsu-no-tabi-qa' ||
+  import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true' ||
+  import.meta.env.VITE_BILL_IDENTITY_V2 !== 'true'
+)) {
+  throw new Error('QA mode requires the osatsu-no-tabi-qa project, real Firebase services, and v2 enabled.');
+}
 
 const recaptchaEnterpriseSiteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY;
 
@@ -65,7 +77,7 @@ let auth: Auth | null = null;
 
 if (isFirebaseConfigured) {
   try {
-    app = useFirebaseEmulators
+    app = import.meta.env.DEV && useFirebaseEmulators
       ? getApps().find((item) => item.name === 'identity-v2-emulator') ?? initializeApp(firebaseConfig, 'identity-v2-emulator')
       : getApps().find((item) => item.name === '[DEFAULT]') ?? initializeApp(firebaseConfig);
 
@@ -110,7 +122,7 @@ if (isFirebaseConfigured) {
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
     });
-    if (useFirebaseEmulators) connectFirestoreEmulator(db, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
+    if (import.meta.env.DEV && useFirebaseEmulators) connectFirestoreEmulator(db, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
     console.info('Firebase Firestore initialized with experimentalForceLongPolling: true');
   } catch (err) {
     console.error('Failed to initialize Firebase:', err);
@@ -131,7 +143,7 @@ if (isFirebaseConfigured) {
 if (app) {
   try {
     auth = getAuth(app);
-    if (useFirebaseEmulators) connectAuthEmulator(auth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
+    if (import.meta.env.DEV && useFirebaseEmulators) connectAuthEmulator(auth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
   } catch (err) {
     if (useFirebaseEmulators) auth = null; // Never retain an unconnected demo Auth instance.
     console.warn('Firebase Auth is unavailable; device bill list is disabled:', err);
@@ -169,7 +181,7 @@ export function getGoogleMergeContext(): { auth: Auth; db: Firestore } {
     ? getFirestore(secondaryApp)
     : initializeFirestore(secondaryApp, { experimentalForceLongPolling: true });
 
-  if (useFirebaseEmulators && !existingSecondaryApp) {
+  if (import.meta.env.DEV && useFirebaseEmulators && !existingSecondaryApp) {
     connectAuthEmulator(secondaryAuth, `http://${emulatorEndpoint.host}:${emulatorEndpoint.authPort}`, { disableWarnings: true });
     connectFirestoreEmulator(secondaryDb, emulatorEndpoint.host, emulatorEndpoint.firestorePort);
   } else if (!useFirebaseEmulators && isAppCheckConfigured && typeof window !== 'undefined') {

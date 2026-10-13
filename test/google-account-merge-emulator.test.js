@@ -6,7 +6,7 @@ import {
   connectAuthEmulator, GoogleAuthProvider, getAuth, linkWithCredential, signInWithCredential,
 } from 'firebase/auth';
 import {
-  doc, getDoc, serverTimestamp, setDoc, Timestamp, updateDoc,
+  collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc, where,
 } from 'firebase/firestore';
 import { cleanupCompletedTrackedBillMerge, mergeTrackedBillsWithConsent, previewTrackedBillMerge, runTrackedBillMerge } from '../src/services/trackedBillMerge.ts';
 import {
@@ -18,6 +18,7 @@ const project = 'demo-osatsu-account-merge-poc';
 const sourceBillId = 'b7a1d95c-9ad1-4f7d-8758-82fe4dc4f801';
 const duplicateBillId = 'b7a1d95c-9ad1-4f7d-8758-82fe4dc4f802';
 const concurrentBillId = 'b7a1d95c-9ad1-4f7d-8758-82fe4dc4f803';
+const followedBillId = 'b7a1d95c-9ad1-4f7d-8758-82fe4dc4f804';
 
 function googleToken(subject) {
   const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -83,6 +84,7 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
   const targetPath = `users/${targetUid}/trackedBills`;
   const sourceRecord = tracked(sourceBillId, 'AA123456BB');
   const sourceDuplicate = tracked(duplicateBillId, 'BC234567DE', { firstRegisteredByMe: false });
+  const sourceFollowed = tracked(followedBillId, 'EF345678GH', { firstRegisteredByMe: false });
   const targetDuplicate = tracked(duplicateBillId, 'BC234567DE', {
     firstRegisteredByMe: true,
     notifyOnRediscovery: false,
@@ -91,6 +93,7 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
   });
   await adminSet(`${sourcePath}/${sourceBillId}`, sourceRecord, project);
   await adminSet(`${sourcePath}/${duplicateBillId}`, sourceDuplicate, project);
+  await adminSet(`${sourcePath}/${followedBillId}`, sourceFollowed, project);
   await adminSet(`${targetPath}/${duplicateBillId}`, targetDuplicate, project);
   await adminSet(`publicBills/${sourceBillId}`, { id: sourceBillId, sightingsCount: 2 }, project);
   await adminSet('sightings/merge-poc-existing-sighting', { publicBillId: sourceBillId, step: 2 }, project);
@@ -104,8 +107,8 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
     await assert.rejects(getDoc(doc(target.db, `${sourcePath}/${sourceBillId}`)), (error) => error.code === 'permission-denied');
     await assert.rejects(getDoc(doc(attacker.db, `${sourcePath}/${sourceBillId}`)), (error) => error.code === 'permission-denied');
     const preview = await previewTrackedBillMerge(source.db, target.db, sourceUid, targetUid);
-    assert.equal(preview.totalCount, 2);
-    assert.equal(preview.copyCount, 1);
+    assert.equal(preview.totalCount, 3);
+    assert.equal(preview.copyCount, 2);
     assert.equal(preview.duplicateCount, 1);
     assert.equal(preview.alreadyCopiedCount, 0);
     assert.equal(await adminGet(`${targetPath}/${sourceBillId}`, project), null);
@@ -159,15 +162,30 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
 
     preview = await previewTrackedBillMerge(source.db, target.db, sourceUid, targetUid);
     assert.equal(preview.ticketId, ticketId);
-    assert.equal(preview.copyCount, 0);
+    assert.equal(preview.copyCount, 1);
     assert.equal(preview.duplicateCount, 1);
     assert.equal(preview.alreadyCopiedCount, 1);
     const resumed = await runTrackedBillMerge({ sourceDb: source.db, targetDb: target.db, sourceUid, targetUid, preview });
-    assert.equal(resumed.copiedCount, 1);
+    assert.equal(resumed.copiedCount, 2);
     assert.equal(resumed.duplicateCount, 1);
     assert.deepEqual(await adminGet(`${targetPath}/${sourceBillId}`, project), sourceRecord);
     assert.deepEqual(await adminGet(`${targetPath}/${duplicateBillId}`, project), targetDuplicate);
+    assert.deepEqual(await adminGet(`${targetPath}/${followedBillId}`, project), sourceFollowed);
     assert.deepEqual(await adminGet(`${sourcePath}/${duplicateBillId}`, project), sourceDuplicate);
+    const followedPage = await getDocs(query(
+      collection(target.db, targetPath),
+      where('firstRegisteredByMe', '==', false),
+      orderBy('createdAt', 'desc'),
+      limit(21),
+    ));
+    assert.deepEqual(followedPage.docs.map((snapshot) => snapshot.id), [followedBillId]);
+    const registeredPage = await getDocs(query(
+      collection(target.db, targetPath),
+      where('firstRegisteredByMe', '==', true),
+      orderBy('createdAt', 'desc'),
+      limit(21),
+    ));
+    assert.deepEqual(new Set(registeredPage.docs.map((snapshot) => snapshot.id)), new Set([sourceBillId, duplicateBillId]));
   });
 
   await t.test('cross-account ticket misuse and expired authorization are rejected', async () => {
@@ -207,7 +225,7 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
     const concurrentTicket = opaque();
     const expiresAt = Timestamp.fromMillis(Date.now() + 10 * 60_000);
     await setDoc(doc(target.db, `users/${targetUid}/trackedBillMergeTickets/${concurrentTicket}`), {
-      sourceUid, targetUid, totalCount: 3, status: 'open', createdAt: serverTimestamp(), expiresAt,
+      sourceUid, targetUid, totalCount: 4, status: 'open', createdAt: serverTimestamp(), expiresAt,
     });
     await setDoc(doc(source.db, `users/${sourceUid}/trackedBillMergeLocks/active`), {
       sourceUid, targetUid, ticketId: concurrentTicket, expiresAt,

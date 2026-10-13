@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { changeIdentityDesign, selectionIdentity } from '../src/utils/billIdentitySelection.ts';
 import { identitySearchKeys, readIdentityCandidates, createRequestVersion } from '../src/utils/identitySearch.ts';
-import { identityEmulatorEnabled, identityV2Enabled, validIdentityConnection } from '../src/utils/identityEnvironment.ts';
+import { identityEmulatorEnabled, identityV2Enabled, validIdentityConnection, validQaFirebaseEnvironment } from '../src/utils/identityEnvironment.ts';
 import { translate } from '../src/i18n.ts';
 
 test('D/E need explicit design and color; unknown values remain unresolved', () => {
@@ -65,7 +65,7 @@ test('Emulator is explicit opt-in only in development, never in a production bui
 });
 test('Japanese and English identity messages exist without changing internal codes', () => {
   for (const language of ['ja', 'en']) {
-    for (const key of ['identityLegacyText', 'identityIncomplete', 'identityMismatch', 'identitySearchDenied', 'identitySearchError', 'identityHold', 'identityAutomatic']) {
+    for (const key of ['identityLegacyText', 'identityIncomplete', 'identityMismatch', 'identitySearchDenied', 'identitySearchError', 'identityHold', 'identityAutomatic', 'trackedFollowingTitle', 'trackedFollowingDescription']) {
       assert.ok(translate(language, key).length > 5);
     }
   }
@@ -82,4 +82,12 @@ test('v2 feature and emulator transport are independent and default off', () => 
   assert.equal(validIdentityConnection(true, 'production-project', 'production-project', '127.0.0.1'), false);
   assert.equal(validIdentityConnection(false, 'production-project', 'other-project'), false);
   assert.equal(validIdentityConnection(true, 'demo-osatsu-public-serial', 'demo-osatsu-public-serial', '127.0.0.1'), true);
+});
+
+test('QA mode is pinned to QA project, real services, and v2', () => {
+  assert.equal(validQaFirebaseEnvironment('qa', 'osatsu-no-tabi-qa', 'false', 'true'), true);
+  assert.equal(validQaFirebaseEnvironment('qa', 'george-69c3a', 'false', 'true'), false);
+  assert.equal(validQaFirebaseEnvironment('qa', 'osatsu-no-tabi-qa', 'true', 'true'), false);
+  assert.equal(validQaFirebaseEnvironment('qa', 'osatsu-no-tabi-qa', 'false', 'false'), false);
+  assert.equal(validQaFirebaseEnvironment('development', 'george-69c3a', 'false', 'false'), true);
 });

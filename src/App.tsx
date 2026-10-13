@@ -30,6 +30,7 @@ type BillReturnContext = {
   hash: string;
   publicBillId: string;
   visibleCount: number | null;
+  trackedListKind: 'registered' | 'following' | null;
 };
 type GoogleSyncDiagnostic = { stage: string; code: string | null };
 
@@ -182,7 +183,8 @@ export function App() {
     view: ViewMode,
     identifier?: string,
     keepRegistrationNotice = false,
-    visibleCount: number | null = null
+    visibleCount: number | null = null,
+    trackedListKind: 'registered' | 'following' | null = null,
   ) => {
     setRouteRevision((revision) => revision + 1);
     if (!keepRegistrationNotice) {
@@ -194,6 +196,7 @@ export function App() {
         hash: window.location.hash || '#/',
         publicBillId: identifier,
         visibleCount,
+        trackedListKind,
       };
       setSelectedPublicBillId(identifier);
       setCurrentView('bill');
@@ -588,9 +591,11 @@ export function App() {
           <TrackedBillsView
             key={authUid}
             uid={authUid}
-            restoreTargetBillId={billReturnForRestore?.hash === '#/my-bills' ? billReturnForRestore.publicBillId : null}
+            restoreTargetBillId={billReturnForRestore?.hash === '#/my-bills' && billReturnForRestore.trackedListKind !== 'following' ? billReturnForRestore.publicBillId : null}
+            followingRestoreTargetBillId={billReturnForRestore?.hash === '#/my-bills' && billReturnForRestore.trackedListKind === 'following' ? billReturnForRestore.publicBillId : null}
             restoreVisibleCount={billReturnForRestore?.hash === '#/my-bills' ? billReturnForRestore.visibleCount : null}
-            onSelectBill={(publicBillId, visibleCount) => navigateTo('bill', publicBillId, false, visibleCount)}
+            restoreListKind={billReturnForRestore?.hash === '#/my-bills' ? billReturnForRestore.trackedListKind : null}
+            onSelectBill={(publicBillId, visibleCount, listKind) => navigateTo('bill', publicBillId, false, visibleCount, listKind)}
             onRestoreComplete={clearBillReturnForRestore}
             syncState={authIsGoogleLinked ? 'linked' : authIsAnonymous ? 'anonymous' : 'other'}
             syncing={googleSyncing}

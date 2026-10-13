@@ -35,7 +35,7 @@ export interface TrackedBillRow {
   bill: BillWithSightings;
   serialNumber: string;
   createdAt: Timestamp | null;
-  firstRegisteredByMe: true;
+  firstRegisteredByMe: boolean;
   notifyOnRediscovery: boolean;
   lastSeenSightingsCount: number;
   lastSeenAt: Timestamp | null;
@@ -44,12 +44,13 @@ export interface TrackedBillRow {
 }
 
 async function loadTrackedBillRows(
-  trackedDocs: QueryDocumentSnapshot<DocumentData>[]
+  trackedDocs: QueryDocumentSnapshot<DocumentData>[],
+  firstRegisteredByMe: boolean,
 ): Promise<TrackedBillRow[]> {
   const rows = await Promise.all(trackedDocs.map(async (trackedDoc) => {
     const entry = trackedDoc.data();
     // Keep a defensive check even though paged queries filter this on Firestore.
-    if (entry.firstRegisteredByMe !== true) return null;
+    if (entry.firstRegisteredByMe !== firstRegisteredByMe) return null;
     if (typeof entry.publicBillId !== 'string' || typeof entry.serialNumber !== 'string') return null;
     const bill = await getPublicBillById(entry.publicBillId);
     if (!bill) return null;
@@ -57,7 +58,9 @@ async function loadTrackedBillRows(
     const lastSeenSightingsCount = baseline.lastSeenSightingsCount;
 
     // One-time migration: establish a quiet baseline without showing old bills as new.
-    if (baseline.shouldPersistBaseline) {
+    // Followed/imported rows are displayed read-only; do not silently rewrite
+    // their read baseline just because the separate section was opened.
+    if (baseline.shouldPersistBaseline && firstRegisteredByMe) {
       try {
         await updateDoc(trackedDoc.ref, {
           lastSeenSightingsCount,
@@ -71,7 +74,7 @@ async function loadTrackedBillRows(
       bill,
       serialNumber: entry.serialNumber,
       createdAt: (entry.createdAt as Timestamp | undefined) ?? null,
-      firstRegisteredByMe: true,
+      firstRegisteredByMe,
       notifyOnRediscovery: entry.notifyOnRediscovery === true,
       lastSeenSightingsCount,
       lastSeenAt: (entry.lastSeenAt as Timestamp | undefined) ?? null,
@@ -86,26 +89,27 @@ export async function getTrackedBills(uid: string): Promise<TrackedBillRow[]> {
   const firestore = db;
   if (!firestore) throw new Error('Firestore is unavailable');
   const trackedSnap = await getDocs(collection(firestore, 'users', uid, 'trackedBills'));
-  const rows = await loadTrackedBillRows(trackedSnap.docs);
+  const rows = await loadTrackedBillRows(trackedSnap.docs, true);
   return sortTrackedBillRows(rows);
 }
 
 export async function getTrackedBillsPage(
   uid: string,
-  cursor: TrackedBillsCursor | null = null
+  cursor: TrackedBillsCursor | null = null,
+  firstRegisteredByMe = true,
 ): Promise<TrackedBillsPage> {
   const firestore = db;
   if (!firestore) throw new Error('Firestore is unavailable');
 
   const trackedRef = collection(firestore, 'users', uid, 'trackedBills');
   const constraints: QueryConstraint[] = [
-    where('firstRegisteredByMe', '==', true),
+    where('firstRegisteredByMe', '==', firstRegisteredByMe),
     orderBy('createdAt', 'desc'),
   ];
   if (cursor) constraints.push(startAfter(cursor));
   const snapshot = await getDocs(query(trackedRef, ...constraints, limit(TRACKED_BILLS_PAGE_SIZE + 1)));
   const page = getPageWindow(snapshot.docs, TRACKED_BILLS_PAGE_SIZE);
-  const rows = await loadTrackedBillRows(page.items);
+  const rows = await loadTrackedBillRows(page.items, firstRegisteredByMe);
 
   return {
     rows,

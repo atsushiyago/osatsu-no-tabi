@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:qa": "vite --mode qa --host 127.0.0.1 --port 5175 --strictPort",
     "dev:identity": "VITE_USE_FIREBASE_EMULATORS=true VITE_BILL_IDENTITY_V2=true vite --host 127.0.0.1 --port 5174 --strictPort",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

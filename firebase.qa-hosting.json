@@ -1,0 +1,14 @@
+{
+  "hosting": {
+    "site": "osatsu-no-tabi-qa",
+    "public": "dist",
+    "ignore": [
+      "firebase.qa-hosting.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ]
+  }
+}

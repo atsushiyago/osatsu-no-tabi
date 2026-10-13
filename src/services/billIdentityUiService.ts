@@ -9,8 +9,12 @@ import { IDENTITY_EMULATOR_PROJECT, validIdentityConnection } from '../utils/ide
 
 function identityContext() {
   if (!isIdentityV2Enabled) throw new IdentityRegistrationError('registration-paused');
-  if (!db || !auth || !validIdentityConnection(useFirebaseEmulators, db.app.options.projectId,
-    auth.app.options.projectId, auth.emulatorConfig?.host, emulatorEndpoint.host)) {
+  if (!db || !auth) throw new IdentityRegistrationError('invalid-connection');
+  const connectionValid = import.meta.env.DEV
+    ? validIdentityConnection(useFirebaseEmulators, db.app.options.projectId,
+      auth.app.options.projectId, auth.emulatorConfig?.host, emulatorEndpoint.host)
+    : db.app.options.projectId === auth.app.options.projectId && !auth.emulatorConfig?.host;
+  if (!connectionValid) {
     throw new IdentityRegistrationError('invalid-connection');
   }
   return { db, auth };
@@ -18,7 +22,7 @@ function identityContext() {
 
 export async function assertIdentityReady() {
   identityContext();
-  if (useFirebaseEmulators) {
+  if (import.meta.env.DEV && useFirebaseEmulators) {
     // No production URLs or keys are used by emulator probes. Missing registration
     // config must not prevent read-only searches; the transaction rejects writes.
     const paths = [
