@@ -71,5 +71,7 @@ test('OCR camera review actions are localized in Japanese and English', () => {
     assert.ok(translate(language, 'ocrCameraUseCandidate').length > 0);
     assert.ok(translate(language, 'ocrCameraRescan').length > 0);
     assert.ok(translate(language, 'ocrCameraManualEntry').length > 0);
+    assert.ok(translate(language, 'ocrCameraPrivacy').length > 0);
+    assert.ok(translate(language, 'ocrCameraGuide').length > 0);
   }
 });

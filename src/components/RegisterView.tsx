@@ -702,20 +702,6 @@ export const RegisterView = ({
               QA診断用の画像を選択
             </button>}
 
-            <div
-              style={{
-                fontSize: '11px',
-                color: '#64748b',
-                marginTop: '6px',
-                textAlign: 'center',
-              }}
-            >
-              {t('ocrCameraPrivacy')}
-            </div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', textAlign: 'center' }}>
-              {t('ocrCameraGuide')}
-            </div>
-
             {/* OCR結果・候補表示 */}
             {ocrMessage && (
               <div
