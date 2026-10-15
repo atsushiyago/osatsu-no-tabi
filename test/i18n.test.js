@@ -75,3 +75,8 @@ test('OCR camera review actions are localized in Japanese and English', () => {
     assert.ok(translate(language, 'ocrCameraGuide').length > 0);
   }
 });
+
+test('serial confirmation copy distinguishes input confirmation from final registration', () => {
+  assert.match(translate('ja', 'identityConfirmHelp'), /お札の登録は.*最後の登録ボタン/);
+  assert.match(translate('en', 'identityConfirmHelp'), /serial number only.*not registered until.*final registration button/i);
+});

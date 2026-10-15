@@ -826,7 +826,7 @@ export const RegisterView = ({
         {isIdentityV2Enabled && <>
           {(identityStage.stage === 'input' || identityStage.stage === 'confirm') && <div className="identity-confirmation" role="status">
             <p className="input-hint">{t(identityStage.stage === 'input' ? 'identityInputFirst' : 'identityConfirmHelp')}</p>
-            {identityStage.stage === 'confirm' && <button type="button" id="identity-confirm-input" className="btn-secondary" disabled={isSubmitting} onClick={() => { setIsSerialFocused(false); confirmIdentitySerial(); }}>{t('identityConfirmSerial')}</button>}
+            {identityStage.stage === 'confirm' && <button type="button" id="identity-confirm-input" className="btn-secondary identity-confirm-button" disabled={isSubmitting} onClick={() => { setIsSerialFocused(false); confirmIdentitySerial(); }}>{t('identityConfirmSerial')}</button>}
           </div>}
           {identityStage.stage !== 'input' && identityStage.stage !== 'confirm' && <BillIdentityFields selection={identitySelection} disabled={isSubmitting} onChange={(next) => {
             setSeries(next.series); setSerialColor(next.serialColor); setErrorMessage(null);

@@ -1094,6 +1094,25 @@ body, .app-container { background: var(--bg-main); }
 .identity-auto-design > strong { font-size: 1.05rem; line-height: 1.5; }
 .identity-auto-design { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }
 
+.identity-confirmation { margin: 0 0 20px; }
+.identity-confirmation .input-hint { margin: 6px 0 8px; }
+.identity-confirm-button {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 16px;
+  border: 2px solid #0f5962;
+  border-radius: 8px;
+  background: #0f5962;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.identity-confirm-button:hover:not(:disabled) { border-color: #0b4249; background: #0b4249; }
+.identity-confirm-button:active:not(:disabled) { border-color: #08363c; background: #08363c; transform: translateY(1px); }
+.app-container #identity-confirm-input:focus-visible { outline: 3px solid #5eead4; outline-offset: 3px; }
+.identity-confirm-button:disabled { border-color: #cbd5e1; background: #e2e8f0; color: #64748b; cursor: not-allowed; box-shadow: none; }
+
 
 /* Camera dialog follows the mobile browser's visible viewport when its chrome moves. */
 .serial-camera-modal {
