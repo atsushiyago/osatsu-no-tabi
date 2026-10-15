@@ -1093,3 +1093,10 @@ body, .app-container { background: var(--bg-main); }
 .identity-options .identity-option > strong,
 .identity-auto-design > strong { font-size: 1.05rem; line-height: 1.5; }
 .identity-auto-design { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }
+
+
+/* Camera dialog follows the mobile browser's visible viewport when its chrome moves. */
+.serial-camera-modal {
+  height: 100vh;
+  height: 100dvh;
+}

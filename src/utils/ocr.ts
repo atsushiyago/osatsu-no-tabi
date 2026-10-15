@@ -1,3 +1,4 @@
+import { getContainedImageRect } from './cameraCapture.ts';
 import { normalizeSerialInput, validateSerialNumber } from './serial.ts';
 import { isDebugTiming } from './debug.ts';
 
@@ -15,6 +16,8 @@ export const OCR_CONFUSION_MAP = {
 } as const;
 
 const MAX_OCR_CORRECTIONS = 2;
+/** OCR sees the full alphanumeric alphabet so positional correction can resolve I/O confusions. */
+export const OCR_ALLOWED_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const SERIAL_LAYOUTS = [
   { prefixLength: 1, suffixLength: 1 },
   { prefixLength: 2, suffixLength: 1 },
@@ -352,16 +355,161 @@ export interface PreprocessedPass {
 }
 
 export interface PsmImageDiagnostic {
-  imageVariant: 'クロップ直後' | 'Contrast Enhanced' | 'Otsu Binarized';
-  psmName: 'SINGLE_WORD' | 'RAW_LINE';
-  padding: boolean;
-  paddingPx: number;
+  imageVariant: 'Original (Upscaled)' | 'Contrast Enhanced' | 'Otsu Binarized';
+  psm: 7 | 13;
+  psmName: 'SINGLE_LINE' | 'RAW_LINE';
+  width: number;
+  height: number;
   rawText: string;
   compactText: string;
+  candidates: string[];
+  rejectedWindows: string[];
+  isValid: boolean;
   confidence: number;
   durationMs: number;
-  isValid: boolean;
+  previewUrl: string;
   error?: string;
+}
+
+export const OCR_PSM_COMPARISON = [
+  { psm: 7, name: 'SINGLE_LINE' },
+  { psm: 13, name: 'RAW_LINE' },
+] as const;
+
+export const REALTIME_OCR_IMAGE = {
+  width: 1400,
+  height: 214,
+  exposure: 1.18,
+  blackLevel: 12,
+  threshold: 150,
+  minimumIntervalMs: 350,
+} as const;
+
+export interface SerialScanObservation {
+  serial: string | null;
+  rawText: string;
+  confidence: number;
+  durationMs: number;
+}
+
+export function evaluateSerialStability(history: readonly SerialScanObservation[]): {
+  serial: string | null;
+  reason: 'two-consecutive' | 'three-of-five' | null;
+} {
+  const recent = history.slice(-5).map((observation) => ({
+    ...observation,
+    serial: observation.serial && validateSerialNumber(observation.serial).isValid
+      ? normalizeSerialInput(observation.serial)
+      : null,
+  }));
+  const lastTwo = recent.slice(-2);
+  if (lastTwo.length === 2 && lastTwo[0].serial && lastTwo[0].serial === lastTwo[1].serial) {
+    return { serial: lastTwo[1].serial, reason: 'two-consecutive' };
+  }
+  const counts = new Map<string, number>();
+  for (const observation of recent) {
+    if (observation.serial) counts.set(observation.serial, (counts.get(observation.serial) ?? 0) + 1);
+  }
+  const match = [...counts.entries()].find(([, count]) => count >= 3);
+  return match ? { serial: match[0], reason: 'three-of-five' } : { serial: null, reason: null };
+}
+
+export interface RealtimeSerialOcrResult extends SerialScanObservation {
+  candidates: string[];
+  input: Blob;
+  width: number;
+  height: number;
+}
+
+export interface RealtimeSerialOcrSession {
+  recognize(image: Blob): Promise<RealtimeSerialOcrResult>;
+  terminate(): Promise<void>;
+}
+
+async function preprocessRealtimeSerialImage(source: Blob): Promise<Blob> {
+  const url = URL.createObjectURL(source);
+  const img = new Image();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Could not load camera frame'));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = REALTIME_OCR_IMAGE.width;
+  canvas.height = REALTIME_OCR_IMAGE.height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('Canvas 2D context unavailable');
+  const fitted = getContainedImageRect(img.naturalWidth, img.naturalHeight, canvas.width, canvas.height);
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(img, fitted.x, fitted.y, fitted.width, fitted.height);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { exposure, blackLevel, threshold } = REALTIME_OCR_IMAGE;
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    const luminance = 0.299 * pixels.data[i] + 0.587 * pixels.data[i + 1] + 0.114 * pixels.data[i + 2];
+    const exposed = Math.max(0, Math.min(255, (luminance - blackLevel) * exposure));
+    const binary = exposed < threshold ? 0 : 255;
+    pixels.data[i] = binary;
+    pixels.data[i + 1] = binary;
+    pixels.data[i + 2] = binary;
+  }
+  context.putImageData(pixels, 0, 0);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not encode OCR frame')), 'image/png');
+  });
+}
+
+/** Create one lazy, reusable local Tesseract worker for the camera session. */
+export async function createRealtimeSerialOcrSession(): Promise<RealtimeSerialOcrSession> {
+  const { createWorker, PSM } = await import('tesseract.js');
+  const worker = await createWorker('eng', 1);
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      tessedit_char_whitelist: OCR_ALLOWED_CHARACTERS,
+    });
+  } catch (error) {
+    await worker.terminate();
+    throw error;
+  }
+  let busy = false;
+  let terminated = false;
+  return {
+    async recognize(image) {
+      if (terminated) throw new Error('OCR session has ended');
+      if (busy) throw new Error('OCR frame already in progress');
+      busy = true;
+      const startedAt = performance.now();
+      try {
+        const input = await preprocessRealtimeSerialImage(image);
+        const result = await worker.recognize(input);
+        const rawText = result.data.text || '';
+        const candidates = extractSerialCandidates(rawText, 3);
+        return {
+          serial: candidates.length === 1 ? candidates[0] : null,
+          rawText,
+          confidence: result.data.confidence ?? 0,
+          durationMs: performance.now() - startedAt,
+          candidates,
+          input,
+          width: REALTIME_OCR_IMAGE.width,
+          height: REALTIME_OCR_IMAGE.height,
+        };
+      } finally {
+        busy = false;
+      }
+    },
+    async terminate() {
+      if (terminated) return;
+      terminated = true;
+      await worker.terminate();
+    },
+  };
 }
 
 export interface OcrSerialCandidate {
@@ -372,75 +520,60 @@ export interface OcrSerialCandidate {
   sourcePasses: string[];
 }
 
+export function getOcrUpscaleFactor(sourceWidth: number, sourceHeight: number): number {
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new RangeError('OCR image dimensions must be positive');
+  }
+  return Math.min(4, Math.max(1, 420 / sourceHeight), 4096 / sourceWidth);
+}
+
+/** Merge valid suggestions from one captured image; every result remains a manual-review suggestion. */
+export function collectSingleImageOcrCandidates(
+  passResults: readonly (readonly OcrSerialCandidate[])[]
+): OcrSerialCandidate[] {
+  const merged = new Map<string, { candidate: OcrSerialCandidate; sources: Set<string> }>();
+  for (const results of passResults) {
+    for (const candidate of results) {
+      if (!candidate.isValid) continue;
+      const source = candidate.sourcePasses[0] ?? 'OCR';
+      const existing = merged.get(candidate.serial);
+      if (existing) {
+        existing.sources.add(source);
+        if (candidate.confidence > existing.candidate.confidence) existing.candidate = candidate;
+      } else {
+        merged.set(candidate.serial, { candidate, sources: new Set([source]) });
+      }
+    }
+  }
+  return [...merged.values()]
+    .map(({ candidate, sources }) => ({
+      ...candidate,
+      requiresReview: true,
+      sourcePasses: [...sources],
+    }))
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 3);
+}
+
+function getRejectedWindows(rawText: string): string[] {
+  const compact = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
+  const rejected = new Map<string, string>();
+  for (const length of [8, 9, 10]) {
+    for (let start = 0; start <= compact.length - length; start++) {
+      const value = compact.slice(start, start + length);
+      const validation = validateSerialNumber(value);
+      if (!validation.isValid) rejected.set(value, value);
+    }
+  }
+  return [...rejected.values()].slice(0, 12);
+}
+
 export interface OcrCorrectionDiagnostic extends OcrSerialCorrectionResult {
   pass: string;
 }
 
-function serialFormatDistance(value: string): number {
-  const layouts = [
-    { letters: 1, suffix: 1 },
-    { letters: 1, suffix: 2 },
-    { letters: 2, suffix: 1 },
-    { letters: 2, suffix: 2 },
-  ];
-  return Math.min(...layouts.map(({ letters, suffix }) => {
-    if (value.length !== letters + 6 + suffix) return Number.POSITIVE_INFINITY;
-    let mismatches = 0;
-    for (let i = 0; i < value.length; i++) {
-      const expectsLetter = i < letters || i >= letters + 6;
-      if (expectsLetter ? !/[A-Z]/.test(value[i]) : !/[0-9]/.test(value[i])) mismatches++;
-    }
-    return mismatches;
-  }));
-}
-
-function extractReviewCandidates(rawText: string): string[] {
-  const compact = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
-  const candidates = new Set<string>();
-  for (const length of [8, 9, 10]) {
-    for (let start = 0; start <= compact.length - length; start++) {
-      const candidate = compact.slice(start, start + length);
-      if (!validateSerialNumber(candidate).isValid && serialFormatDistance(candidate) <= 2) {
-        candidates.add(candidate);
-      }
-    }
-  }
-  return [...candidates];
-}
-
-async function addWhitePadding(source: Blob): Promise<{ blob: Blob; paddingPx: number }> {
-  const img = new Image();
-  const sourceUrl = URL.createObjectURL(source);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error('Failed to load image for padding'));
-      img.src = sourceUrl;
-    });
-  } finally {
-    URL.revokeObjectURL(sourceUrl);
-  }
-
-  const width = img.naturalWidth || img.width;
-  const height = img.naturalHeight || img.height;
-  const paddingPx = Math.min(30, Math.max(20, Math.round(height * 0.1)));
-  const canvas = document.createElement('canvas');
-  canvas.width = width + paddingPx * 2;
-  canvas.height = height + paddingPx * 2;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable for padding');
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(img, paddingPx, paddingPx, width, height);
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Failed to encode padded image')), 'image/png');
-  });
-  return { blob, paddingPx };
-}
-
 /**
- * 画像をOCRに最適な文字サイズ（高さ80〜120px程度）になるよう必要に応じてアップスケールし、
+ * 細いカメラ切り抜きでも文字が小さくなりすぎないよう高さ約420pxを目安に拡大し、
  * 以下の3種類の前処理パターンを生成する:
  * 1. 原画像（アップスケールのみ・カラー情報保持）
  * 2. グレースケール + コントラスト強調
@@ -458,18 +591,9 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
         const srcW = img.naturalWidth || img.width;
         const srcH = img.naturalHeight || img.height;
 
-        // 記番号の文字高さをOCRに十分な解像度（高さ80〜120px程度）にスケールアップ
-        let scale = 1.0;
-        if (srcH < 70) {
-          scale = Math.min(3.0, 100 / Math.max(1, srcH));
-        } else if (srcH < 100) {
-          scale = 1.5;
-        }
-
-        // 最大幅は1600pxに制限
-        if (srcW * scale > 1600) {
-          scale = 1600 / srcW;
-        }
+        // 横長のserial ROIを縮小しない。高解像度フレームも文字を保てる範囲で
+        // 約420px高まで拡大し、極端に巨大な画像は避ける。
+        const scale = getOcrUpscaleFactor(srcW, srcH);
 
         const width = Math.max(1, Math.round(srcW * scale));
         const height = Math.max(1, Math.round(srcH * scale));
@@ -602,27 +726,22 @@ export async function generatePreprocessedPasses(imageSource: Blob | File): Prom
  * - 複数前処理パターンを順次評価し、最も妥当な候補をマージ
  * - ?debug=timing 時の詳細診断ログ出力
  */
-export async function recognizeBanknoteSerialFromImage(
+async function recognizeBanknoteSerialFromImageInternal(
   imageFileOrBlob: Blob | File,
   onProgress?: (status: string) => void,
   onPassesReady?: (passes: PreprocessedPass[]) => void,
   onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
   onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void,
-  onOcrCorrectionDiagnostics?: (results: OcrCorrectionDiagnostic[]) => void
+  onOcrCorrectionDiagnostics?: (results: OcrCorrectionDiagnostic[]) => void,
 ): Promise<OcrSerialCandidate[]> {
   const debugTiming = isDebugTiming();
 
   const startTime = debugTiming ? performance.now() : 0;
-  let loadTime = 0;
 
   onProgress?.('OCRエンジンを読み込み中...');
 
   // 1. Tesseract.js の動的インポート (初期バンドルサイズ削減)
   const { createWorker, PSM } = await import('tesseract.js');
-
-  if (debugTiming) {
-    loadTime = performance.now() - startTime;
-  }
 
   onProgress?.('画像を前処理中（解像度最適化・二値化など）...');
   let passes: PreprocessedPass[] = [];
@@ -645,7 +764,7 @@ export async function recognizeBanknoteSerialFromImage(
   onProgress?.('記番号を認識中...');
 
   let worker: any = null;
-  const allCandidateSerials = new Map<string, OcrSerialCandidate & { formatDistance: number }>();
+  const passCandidateLists: OcrSerialCandidate[][] = [];
   const correctionDiagnostics: OcrCorrectionDiagnostic[] = [];
   try {
     try {
@@ -664,196 +783,112 @@ export async function recognizeBanknoteSerialFromImage(
       throw err;
     }
 
-    // 記番号を1つの単語として認識。whitelistは適用しない。
-    try {
-      await worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_WORD,
-        tessedit_char_whitelist: '',
-      });
-    } catch (err) {
-      const error = err as Error & { code?: string };
-      onRecognizeEvent?.({ type: 'error', pass: 'initialize', message: error.message, code: error.code });
-      throw err;
-    }
     const contrastPass = passes.find((pass) => pass.name.includes('Contrast'));
     const otsuPass = passes.find((pass) => pass.name.includes('Otsu'));
-    const normalPasses: PreprocessedPass[] = [
-      { ...(passes[0]), name: 'クロップ直後', blob: imageFileOrBlob },
-      ...(contrastPass ? [contrastPass] : []),
-      ...(otsuPass ? [otsuPass] : []),
-    ];
+    const imageVariants = [
+      passes[0] && { pass: passes[0], name: 'Original (Upscaled)' as const },
+      contrastPass && { pass: contrastPass, name: 'Contrast Enhanced' as const },
+      otsuPass && { pass: otsuPass, name: 'Otsu Binarized' as const },
+    ].filter((variant): variant is { pass: PreprocessedPass; name: PsmImageDiagnostic['imageVariant'] } => Boolean(variant));
+    const diagnosticResults: PsmImageDiagnostic[] = [];
 
-    for (let i = 0; i < normalPasses.length; i++) {
-      const pass = normalPasses[i];
-      onProgress?.(`記番号を認識中... (${i + 1}/${passes.length}: ${pass.name})`);
-
-      const passStart = debugTiming ? performance.now() : 0;
-      onRecognizeEvent?.({ type: 'start', pass: pass.name });
-      let ret;
-      try {
-        ret = await worker.recognize(pass.blob);
-      } catch (err) {
-        const error = err as Error & { code?: string };
-        onRecognizeEvent?.({ type: 'error', pass: pass.name, message: error.message, code: error.code });
-        throw err;
-      }
-      const rawText = ret.data.text || '';
-      const confidence = ret.data.confidence ?? 0;
-      const passDuration = debugTiming ? performance.now() - passStart : 0;
-
-      if (debugTiming) {
-        const correction = correctOcrSerial(rawText);
-        const diagnostic: OcrCorrectionDiagnostic = { pass: pass.name, ...correction };
-        correctionDiagnostics.push(diagnostic);
-        onOcrCorrectionDiagnostics?.([...correctionDiagnostics]);
-        console.log('[OCR Correction]', {
-          pass: pass.name,
-          normalizedText: correction.normalizedText,
-          generatedCandidateCount: correction.generatedCandidateCount,
-          validCandidates: correction.validCandidates,
-          selectedCandidate: correction.selectedCandidate,
-          correctionCount: correction.correctionCount,
-          ambiguous: correction.ambiguous,
-          status: correction.status,
-        });
-      }
-
-      onRecognizeEvent?.({ type: 'end', pass: pass.name });
-
-      // 候補抽出
-      const passCandidates = extractSerialCandidates(rawText, 3);
-      const compactRaw = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
-      const observations = [
-        ...passCandidates.map((serial) => ({ serial, isValid: true })),
-        ...extractReviewCandidates(rawText).map((serial) => ({ serial, isValid: false })),
-      ];
-
-      if (debugTiming) {
-        console.log(
-          `%c[OCR Pass ${i + 1}: ${pass.name}] ` +
-          `Time: ${passDuration.toFixed(0)}ms | Conf: ${confidence.toFixed(1)}% | ` +
-          `Size: ${pass.stats.width}x${pass.stats.height} | ` +
-          `Lum(min/max/avg): ${pass.stats.minLum}/${pass.stats.maxLum}/${pass.stats.avgLum} | ` +
-          `Trans: ${pass.stats.transparentRatio} | ` +
-          `Raw: "${rawText.replace(/[\r\n]+/g, ' ').trim()}" | ` +
-          `Candidates: [${passCandidates.join(', ')}]`,
-          'background: #1e293b; color: #38bdf8; font-family: monospace; font-size: 11px; padding: 2px 4px;'
-        );
-      }
-
-      for (const observation of observations) {
-        const { serial, isValid } = observation;
-        const exactText = compactRaw.includes(serial);
-        const existing = allCandidateSerials.get(serial);
-        if (!existing) {
-          allCandidateSerials.set(serial, {
-            serial,
-            isValid,
-            requiresReview: !isValid || !exactText,
-            confidence,
-            sourcePasses: [pass.name],
-            formatDistance: serialFormatDistance(serial),
+    // One captured image is evaluated as three image variants × PSM 7/13.
+    // No frame voting or auto-acceptance is done; results are suggestions only.
+    for (const variant of imageVariants) {
+      for (const psm of OCR_PSM_COMPARISON) {
+        const label = `${variant.name} / PSM ${psm.psm} (${psm.name})`;
+        onProgress?.(`記番号を認識中... (${label})`);
+        onRecognizeEvent?.({ type: 'start', pass: label });
+        let rawText = '';
+        let confidence = 0;
+        let durationMs = 0;
+        let errorMessage: string | undefined;
+        const passStart = performance.now();
+        try {
+          await worker.setParameters({
+            tessedit_pageseg_mode: psm.psm === 7 ? PSM.SINGLE_LINE : PSM.RAW_LINE,
+            tessedit_char_whitelist: OCR_ALLOWED_CHARACTERS,
           });
-        } else {
-          existing.isValid ||= isValid;
-          existing.requiresReview &&= !isValid || !exactText;
-          existing.confidence = Math.max(existing.confidence, confidence);
-          if (!existing.sourcePasses.includes(pass.name)) existing.sourcePasses.push(pass.name);
+          const ret = await worker.recognize(variant.pass.blob);
+          rawText = ret.data.text || '';
+          confidence = ret.data.confidence ?? 0;
+          onRecognizeEvent?.({ type: 'end', pass: label });
+        } catch (err) {
+          const error = err as Error & { code?: string };
+          errorMessage = error.message || String(err);
+          onRecognizeEvent?.({ type: 'error', pass: label, message: errorMessage, code: error.code });
+        }
+        durationMs = performance.now() - passStart;
+        const compactText = cleanOcrText(rawText).replace(/[^A-Z0-9]/g, '');
+        const candidates = extractSerialCandidates(rawText, 3);
+        const candidateResults = candidates.map((serial) => ({
+          serial,
+          isValid: validateSerialNumber(serial).isValid,
+          requiresReview: true,
+          confidence,
+          sourcePasses: [label],
+        }));
+        passCandidateLists.push(candidateResults);
+        diagnosticResults.push({
+          imageVariant: variant.name,
+          psm: psm.psm,
+          psmName: psm.name,
+          width: variant.pass.stats.width,
+          height: variant.pass.stats.height,
+          rawText,
+          compactText,
+          candidates,
+          rejectedWindows: getRejectedWindows(rawText),
+          isValid: candidates.length > 0,
+          confidence,
+          durationMs,
+          previewUrl: variant.pass.previewUrl,
+          error: errorMessage,
+        });
+        if (debugTiming) onPsmDiagnostics?.([...diagnosticResults]);
+
+        if (debugTiming) {
+          const correction = correctOcrSerial(rawText);
+          correctionDiagnostics.push({ pass: label, ...correction });
+          onOcrCorrectionDiagnostics?.([...correctionDiagnostics]);
+          console.log(`[OCR Debug] ${label} raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" candidates=${candidates.length} confidence=${confidence.toFixed(1)}% duration=${durationMs.toFixed(0)}ms`);
         }
       }
     }
 
+    const allCandidates = collectSingleImageOcrCandidates(passCandidateLists);
     if (debugTiming) {
-      const diagnosticResults: PsmImageDiagnostic[] = [];
-      const contrastPass = passes.find((pass) => pass.name.includes('Contrast'));
-      const otsuPass = passes.find((pass) => pass.name.includes('Otsu'));
-      const imageVariants: Array<{ name: PsmImageDiagnostic['imageVariant']; blob: Blob | null }> = [
-        { name: 'クロップ直後', blob: imageFileOrBlob },
-        { name: 'Contrast Enhanced', blob: contrastPass?.blob || null },
-        { name: 'Otsu Binarized', blob: otsuPass?.blob || null },
-      ];
-      const psmCases = [
-        { name: 'SINGLE_WORD' as const, value: PSM.SINGLE_WORD },
-        { name: 'RAW_LINE' as const, value: PSM.RAW_LINE },
-      ];
-
-      for (const variant of imageVariants) {
-        for (const psm of psmCases) {
-          for (const usePadding of [false, true]) {
-            const label = `${variant.name} / ${psm.name} / padding ${usePadding ? 'on' : 'off'}`;
-            onProgress?.(`OCR診断中... (${label})`);
-            onRecognizeEvent?.({ type: 'start', pass: label });
-            let recognizeStartedAt: number | null = null;
-            let rawText = '';
-            let confidence = 0;
-            let durationMs = 0;
-            let paddingPx = 0;
-            let errorMessage: string | undefined;
-
-            try {
-              if (!variant.blob) throw new Error(`${variant.name} image is unavailable`);
-              const input = usePadding ? await addWhitePadding(variant.blob) : { blob: variant.blob, paddingPx: 0 };
-              paddingPx = input.paddingPx;
-              await worker.setParameters({
-                tessedit_pageseg_mode: psm.value,
-                tessedit_char_whitelist: '',
-              });
-              recognizeStartedAt = performance.now();
-              const ret = await worker.recognize(input.blob);
-              rawText = ret.data.text || '';
-              confidence = ret.data.confidence ?? 0;
-              durationMs = performance.now() - recognizeStartedAt;
-              onRecognizeEvent?.({ type: 'end', pass: label });
-            } catch (err) {
-              const error = err as Error & { code?: string };
-              durationMs = recognizeStartedAt === null ? 0 : performance.now() - recognizeStartedAt;
-              errorMessage = error.message || String(err);
-              console.log(`[OCR Debug] ${label} error=${errorMessage}`);
-            }
-
-            const compactText = rawText.replace(/\s/g, '');
-            diagnosticResults.push({
-              imageVariant: variant.name,
-              psmName: psm.name,
-              padding: usePadding,
-              paddingPx,
-              rawText,
-              compactText,
-              confidence,
-              durationMs,
-              isValid: validateSerialNumber(compactText).isValid,
-              error: errorMessage,
-            });
-            onPsmDiagnostics?.([...diagnosticResults]);
-            console.log(`[OCR Debug] ${label} raw="${rawText.replace(/[\r\n]+/g, ' ').trim()}" compact="${compactText}" confidence=${confidence.toFixed(1)}% time=${durationMs.toFixed(0)}ms valid=${validateSerialNumber(compactText).isValid}`);
-          }
-        }
-      }
-
-      // Debug比較後も通常OCRと同じパラメータに戻す。
-      await worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_WORD,
-        tessedit_char_whitelist: '',
-      });
+      console.log(`[OCR Timing] total=${(performance.now() - startTime).toFixed(0)}ms comparisons=${diagnosticResults.length} suggestions=${allCandidates.length}`);
     }
-    if (debugTiming) {
-      console.log(
-        `%c[Timing Monitor] Total OCR Load: ${loadTime.toFixed(0)}ms | Total Time: ${(performance.now() - startTime).toFixed(0)}ms | Unique Candidates: ${allCandidateSerials.size}`,
-        'background: #7c3aed; color: #fff; font-weight: bold; padding: 2px 6px; border-radius: 4px;'
-      );
-    }
-
-    const sorted = Array.from(allCandidateSerials.values()).sort((a, b) =>
-      Number(a.requiresReview) - Number(b.requiresReview) ||
-      a.formatDistance - b.formatDistance ||
-      b.confidence - a.confidence ||
-      b.serial.length - a.serial.length
-    );
-
-    return sorted.slice(0, 3).map(({ formatDistance: _formatDistance, ...candidate }) => candidate);
+    return allCandidates;
   } finally {
     if (worker) {
       await worker.terminate();
     }
+    if (!debugTiming) passes.forEach((pass) => URL.revokeObjectURL(pass.previewUrl));
+  }
+}
+
+let recognitionInProgress = false;
+export async function recognizeBanknoteSerialFromImage(
+  imageFileOrBlob: Blob | File,
+  onProgress?: (status: string) => void,
+  onPassesReady?: (passes: PreprocessedPass[]) => void,
+  onRecognizeEvent?: (event: { type: 'start' | 'end' | 'error'; pass: string; message?: string; code?: string }) => void,
+  onPsmDiagnostics?: (results: PsmImageDiagnostic[]) => void,
+  onOcrCorrectionDiagnostics?: (results: OcrCorrectionDiagnostic[]) => void,
+): Promise<OcrSerialCandidate[]> {
+  if (recognitionInProgress) {
+    const error = new Error('OCR is already running');
+    Object.assign(error, { code: 'ocr/busy' });
+    throw error;
+  }
+  recognitionInProgress = true;
+  try {
+    return await recognizeBanknoteSerialFromImageInternal(
+      imageFileOrBlob, onProgress, onPassesReady, onRecognizeEvent, onPsmDiagnostics, onOcrCorrectionDiagnostics
+    );
+  } finally {
+    recognitionInProgress = false;
   }
 }

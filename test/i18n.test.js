@@ -61,3 +61,13 @@ test('Google authentication errors are translated in the active language', () =>
   assert.match(getGoogleSyncErrorMessage({ code: 'auth/popup-blocked' }, 'en'), /pop-ups/);
   assert.equal(getGoogleSyncErrorMessage({ code: 'auth/popup-closed-by-user' }, 'en'), null);
 });
+
+
+test('OCR camera review actions are localized in Japanese and English', () => {
+  for (const language of ['ja', 'en']) {
+    assert.ok(translate(language, 'ocrCameraReviewTitle').length > 0);
+    assert.ok(translate(language, 'ocrCameraUseCandidate').length > 0);
+    assert.ok(translate(language, 'ocrCameraRescan').length > 0);
+    assert.ok(translate(language, 'ocrCameraManualEntry').length > 0);
+  }
+});

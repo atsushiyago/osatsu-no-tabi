@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { correctOcrSerial, extractSerialCandidates } from '../src/utils/ocr.ts';
+import { collectSingleImageOcrCandidates, correctOcrSerial, evaluateSerialStability, extractSerialCandidates, getOcrUpscaleFactor, OCR_ALLOWED_CHARACTERS, OCR_PSM_COMPARISON, REALTIME_OCR_IMAGE } from '../src/utils/ocr.ts';
 
 test('OCR後補正は正しいrawを変更せず、NFKCと大文字化を適用する', () => {
   const result = correctOcrSerial('ａａ１２３４５６ｂ');
@@ -161,4 +161,64 @@ test('無理な補正（3文字以上の置換が必要な無関係な文字列�
   // 1〜2文字程度の軽微な混同のみ許容 (例: 'AA1234568' -> 8がBで1文字補正)
   const resValid = extractSerialCandidates('AA1234568');
   assert.deepStrictEqual(resValid, ['AA123456B']);
+});
+
+test('Tesseract whitelist accepts OCR-confusable alphanumerics; final candidates still use the v2 validator', () => {
+  assert.equal(OCR_ALLOWED_CHARACTERS, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  assert.equal(/[IO]/.test(OCR_ALLOWED_CHARACTERS), true);
+  assert.deepStrictEqual(extractSerialCandidates('AA123456O'), []);
+});
+
+test('細いOCR切り抜きは縮小せず拡大し、画像寸法の上限を守る', () => {
+  assert.ok(getOcrUpscaleFactor(1920, 152) > 1);
+  assert.equal(getOcrUpscaleFactor(5000, 200), 4096 / 5000);
+  assert.equal(getOcrUpscaleFactor(950, 268), 420 / 268);
+  assert.throws(() => getOcrUpscaleFactor(0, 200), /dimensions/);
+});
+
+test('OCR comparison uses one still image with SINGLE_LINE PSM 7 and RAW_LINE PSM 13', () => {
+  assert.deepEqual(OCR_PSM_COMPARISON, [
+    { psm: 7, name: 'SINGLE_LINE' },
+    { psm: 13, name: 'RAW_LINE' },
+  ]);
+});
+
+test('single-image OCR suggestions do not require cross-pass agreement and always require manual review', () => {
+  const candidate = (serial, source, confidence, isValid = true) => ({
+    serial, sourcePasses: [source], confidence, isValid, requiresReview: false,
+  });
+  const suggestions = collectSingleImageOcrCandidates([
+    [candidate('AA123456B', 'Original / PSM 7', 72)],
+    [candidate('AA123456B', 'Contrast / PSM 13', 88), candidate('AA123457B', 'Otsu / PSM 7', 41)],
+    [candidate('AA123458B', 'Otsu / PSM 13', 99, false)],
+  ]);
+  assert.deepEqual(suggestions.map(({ serial }) => serial), ['AA123456B', 'AA123457B']);
+  assert.equal(suggestions[0].confidence, 88);
+  assert.deepEqual(suggestions[0].sourcePasses, ['Original / PSM 7', 'Contrast / PSM 13']);
+  assert.ok(suggestions.every(({ requiresReview }) => requiresReview));
+});
+
+test('realtime scanner uses a single 1400x214 fixed-threshold pass at a minimum 350ms start interval', () => {
+  assert.deepEqual(REALTIME_OCR_IMAGE, {
+    width: 1400, height: 214, exposure: 1.18, blackLevel: 12, threshold: 150, minimumIntervalMs: 350,
+  });
+});
+
+test('stability accepts two consecutive equal valid serial observations', () => {
+  const result = evaluateSerialStability([
+    { serial: null, rawText: 'A123', confidence: 90, durationMs: 300 },
+    { serial: 'AA123456B', rawText: 'AA123456B', confidence: 80, durationMs: 320 },
+    { serial: 'AA123456B', rawText: 'AA123456B', confidence: 82, durationMs: 310 },
+  ]);
+  assert.deepEqual(result, { serial: 'AA123456B', reason: 'two-consecutive' });
+});
+
+test('stability accepts 3 of last 5 but does not count older observations', () => {
+  const item = (serial) => ({ serial, rawText: serial ?? '', confidence: 70, durationMs: 350 });
+  assert.deepEqual(evaluateSerialStability([
+    item('AA123456B'), item('CC123456D'), item('AA123456B'), item('CC123456D'), item('AA123456B'),
+  ]), { serial: 'AA123456B', reason: 'three-of-five' });
+  assert.deepEqual(evaluateSerialStability([
+    item('AA123456B'), item(null), item('AA123456B'), item(null), item('AA123456B'), item('CC123456D'),
+  ]), { serial: null, reason: null });
 });

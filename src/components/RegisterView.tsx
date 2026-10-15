@@ -14,8 +14,11 @@ import { useSerialInput } from '../hooks/useSerialInput';
 import { useI18n } from '../useI18n';
 import type { TranslationKey } from '../i18n';
 import type { OcrSerialCandidate } from '../utils/ocr.ts';
+import type { PsmImageDiagnostic } from '../utils/ocr.ts';
 import type { CropMetadata } from './CropModal';
 import type { OcrDebugData } from './OcrDebugPanel';
+import { SerialCameraModal } from './SerialCameraModal';
+import { OcrCameraDiagnostics } from './OcrCameraDiagnostics';
 import { isDebugTiming } from '../utils/debug';
 import {
   PREFECTURES,
@@ -115,7 +118,18 @@ export const RegisterView = ({
   const [ocrCandidates, setOcrCandidates] = useState<OcrSerialCandidate[]>([]);
   const [ocrMessage, setOcrMessage] = useState<{
     type: 'success' | 'warn' | 'info';
-    text: string;
+    key?: TranslationKey;
+    text?: string;
+    language?: 'ja' | 'en';
+  } | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const ocrInFlightRef = useRef(false);
+  const [cameraOcrDiagnostics, setCameraOcrDiagnostics] = useState<{
+    inputPreviewUrl: string;
+    inputWidth?: number;
+    inputHeight?: number;
+    comparisons: PsmImageDiagnostic[];
+    error?: { pass: string; message: string; code?: string };
   } | null>(null);
 
   // ?debug=timing 用の画像診断データ
@@ -135,9 +149,11 @@ export const RegisterView = ({
   useEffect(() => () => revokeDebugUrls(), []);
 
   const handleTriggerOcr = () => {
-    if (!isTimingDebug || isOcrProcessing) return;
-    fileInputRef.current?.click();
+    if (isOcrProcessing || ocrInFlightRef.current) return;
+    setIsCameraOpen(true);
   };
+
+  const handleTriggerDebugFile = () => fileInputRef.current?.click();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -152,21 +168,29 @@ export const RegisterView = ({
     setPendingImageFile(file);
   };
 
-  const handleCropComplete = async (croppedBlob: Blob, metadata: CropMetadata) => {
-    setPendingImageFile(null);
+  const processOcrImage = async (croppedBlob: Blob, rawFile: File | null = null, metadata?: CropMetadata) => {
+    if (ocrInFlightRef.current) return;
+    ocrInFlightRef.current = true;
     setIsOcrProcessing(true);
-    setOcrStatusMessage('記番号を読み取っています…');
+    setOcrStatusMessage(t('ocrProcessing'));
     setOcrMessage(null);
     setOcrCandidates([]);
-
-    const rawFile = rawFileRef.current;
     let emittedOcrError = false;
 
     try {
-      if (isTimingDebug) setOcrStatusMessage('OCRを読み込み中…');
       const ocr = await import('../utils/ocr.ts');
 
-      if (isTimingDebug && rawFile) {
+      if (isTimingDebug) {
+        revokeDebugUrls();
+        const inputPreviewUrl = URL.createObjectURL(croppedBlob);
+        debugUrlsRef.current.push(inputPreviewUrl);
+        setCameraOcrDiagnostics({ inputPreviewUrl, comparisons: [] });
+        void ocr.analyzeBlobStats(croppedBlob).then((stats) => {
+          setCameraOcrDiagnostics((current) => current ? { ...current, inputWidth: stats.width, inputHeight: stats.height } : current);
+        }).catch(() => undefined);
+      }
+
+      if (isTimingDebug && rawFile && metadata) {
         const rawImageUrl = URL.createObjectURL(rawFile);
         const croppedImageUrl = URL.createObjectURL(croppedBlob);
         debugUrlsRef.current.push(rawImageUrl, croppedImageUrl);
@@ -178,16 +202,16 @@ export const RegisterView = ({
 
       const candidates = await ocr.recognizeBanknoteSerialFromImage(
         croppedBlob,
-        (msg) => {
-          setOcrStatusMessage(msg);
-        },
+        () => setOcrStatusMessage(t('ocrProcessing')),
         (passes) => {
-          if (isTimingDebug && rawFile) {
+          if (isTimingDebug) {
             const passUrls = passes.map((pass) => pass.previewUrl);
             debugUrlsRef.current.push(...passUrls);
-            setOcrDebugData((current) => current ? { ...current, passes } : current);
-            console.log('[OCR Debug] passesReady=true');
-            console.log('[OCR Debug] imageCount=4');
+            if (rawFile) {
+              setOcrDebugData((current) => current ? { ...current, passes } : current);
+              console.log('[OCR Debug] passesReady=true');
+              console.log('[OCR Debug] imageCount=4');
+            }
           }
         },
         (event) => {
@@ -195,6 +219,10 @@ export const RegisterView = ({
           if (event.type === 'error') {
             console.log(`[OCR Debug] recognizeError pass=${event.pass} message=${event.message || 'Unknown error'}`);
             emittedOcrError = true;
+            setCameraOcrDiagnostics((current) => current ? {
+              ...current,
+              error: { pass: event.pass, message: event.message || 'Unknown error', code: event.code },
+            } : current);
             setOcrDebugData((current) => current ? {
               ...current,
               error: { pass: event.pass, message: event.message || 'Unknown error', code: event.code },
@@ -207,34 +235,38 @@ export const RegisterView = ({
         },
         (results) => {
           if (!isTimingDebug) return;
+          setCameraOcrDiagnostics((current) => current ? { ...current, comparisons: results } : current);
           setOcrDebugData((current) => current ? { ...current, psmDiagnostics: results } : current);
         },
         (results) => {
           if (!isTimingDebug) return;
           setOcrDebugData((current) => current ? { ...current, correctionDiagnostics: results } : current);
-        }
+        },
       );
 
       if (candidates.length > 0) {
         setOcrCandidates(candidates);
         setOcrMessage({
           type: 'info',
-          text: `${candidates.length}件の読み取り候補があります。紙幣と照合し、必要に応じて入力欄で修正してください。`,
+          key: 'ocrCandidatesMessage',
         });
       } else {
         setOcrCandidates([]);
         setOcrMessage({
           type: 'warn',
-          text: '記番号を読み取れませんでした。記番号だけが入るよう枠を合わせて再撮影するか、手入力してください。',
+          key: 'ocrNoResult',
         });
       }
     } catch (err) {
-      console.warn('OCR processing error:', err);
       if (isTimingDebug) {
         const error = err as Error & { code?: string };
         if (!emittedOcrError) {
           console.log(`[OCR Debug] recognizeError pass=initialize message=${error.message || String(err)}`);
         }
+        setCameraOcrDiagnostics((current) => current ? {
+          ...current,
+          error: current.error || { pass: 'initialize', message: error.message || String(err), code: error.code },
+        } : current);
         setOcrDebugData((current) => current ? {
           ...current,
           error: current.error || { pass: 'initialize', message: error.message || String(err), code: error.code },
@@ -243,12 +275,26 @@ export const RegisterView = ({
       setOcrCandidates([]);
       setOcrMessage({
         type: 'warn',
-        text: '読み取り中にエラーが発生しました。もう一度撮影するか、手入力してください。',
+        key: 'ocrFailed',
       });
     } finally {
+      ocrInFlightRef.current = false;
       setIsOcrProcessing(false);
       setOcrStatusMessage(null);
     }
+  };
+
+  const handleCropComplete = (croppedBlob: Blob, metadata: CropMetadata) => {
+    setPendingImageFile(null);
+    void processOcrImage(croppedBlob, rawFileRef.current, metadata);
+  };
+
+  const handleCameraAccept = (serial: string) => {
+    onSerialInputChange(serial);
+    setConfirmedIdentitySerial(null);
+    setSeries(null);
+    setSerialColor(null);
+    setIsCameraOpen(false);
   };
 
   const handleCropCancel = () => {
@@ -594,10 +640,7 @@ export const RegisterView = ({
             {t('normalizeHelp')}
           </p>
 
-          {isTimingDebug && (
-            <>
-              {/* OCRはdebug URLからのみ利用可能 */}
-              <input
+          {isTimingDebug && <input
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -606,9 +649,9 @@ export const RegisterView = ({
                 onChange={handleFileChange}
                 disabled={isOcrProcessing}
                 id="ocr-file-input"
-              />
+              />}
 
-          {/* カメラで記番号を読むボタン & ガイド */}
+          {/* OCR is local-only and is initialized only after an explicit user action. */}
           <div style={{ marginTop: '10px' }}>
             <button
               type="button"
@@ -635,15 +678,18 @@ export const RegisterView = ({
               {isOcrProcessing ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
-                  <span>{ocrStatusMessage || '記番号を読み取っています…'}</span>
+                  <span>{ocrStatusMessage || t('ocrProcessing')}</span>
                 </>
               ) : (
                 <>
                   <Camera size={16} color="#475569" />
-                  <span>カメラで記番号を読む（β）</span>
+                  <span>{t('ocrCameraButton')}</span>
                 </>
               )}
             </button>
+            {isTimingDebug && <button type="button" onClick={handleTriggerDebugFile} style={{ display: 'block', margin: '8px auto 0', minHeight: 36 }}>
+              QA診断用の画像を選択
+            </button>}
 
             <div
               style={{
@@ -653,10 +699,10 @@ export const RegisterView = ({
                 textAlign: 'center',
               }}
             >
-              📷 撮影後、記番号だけが大きく入るように囲んでください（画像は端末内でのみ処理されます）
+              {t('ocrCameraPrivacy')}
             </div>
             <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', textAlign: 'center' }}>
-              読み取り結果は必ず紙幣の記番号と照合してください
+              {t('ocrCameraGuide')}
             </div>
 
             {/* OCR結果・候補表示 */}
@@ -699,14 +745,14 @@ export const RegisterView = ({
                   ) : (
                     <Sparkles size={15} style={{ flexShrink: 0 }} />
                   )}
-                  <span style={{ fontWeight: 600 }}>{ocrMessage.text}</span>
+                  <span style={{ fontWeight: 600 }}>{ocrMessage.key ? t(ocrMessage.key) : ocrMessage.text}</span>
                 </div>
 
                 {/* 候補はユーザーが選んだ場合のみ入力欄へ反映 */}
                 {ocrCandidates.length > 0 && (
                   <div style={{ marginTop: '4px' }}>
                     <div style={{ fontSize: '11px', marginBottom: '4px', opacity: 0.85 }}>
-                      タップすると入力欄へ反映します。紙幣と照合して修正してください。
+                      {t('ocrCandidatesMessage')}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {ocrCandidates.map((candidate) => (
@@ -728,7 +774,7 @@ export const RegisterView = ({
                             cursor: 'pointer',
                           }}
                         >
-                          <span style={{ display: 'block' }}>{candidate.requiresReview ? '読み取り候補（要確認）' : '読み取り候補'}</span>
+                          <span style={{ display: 'block' }}>{candidate.requiresReview ? `${t('ocrCandidateLabel')} · ${t('ocrCandidateReview')}` : t('ocrCandidateLabel')}</span>
                           <span>{candidate.serial}</span>
                         </button>
                       ))}
@@ -757,16 +803,16 @@ export const RegisterView = ({
                       }}
                     >
                       <RefreshCw size={12} />
-                      <span>もう一度撮影</span>
+                      <span>{t('ocrCameraButton')}</span>
                     </button>
                   </div>
                 )}
               </div>
             )}
-              </div>
-            </>
-          )}
+          </div>
         </div>
+
+        {isTimingDebug && cameraOcrDiagnostics && <OcrCameraDiagnostics {...cameraOcrDiagnostics} />}
 
         {isTimingDebug && ocrDebugData && (
           <Suspense fallback={<p role="status">OCR診断を読み込み中…</p>}>
@@ -774,7 +820,7 @@ export const RegisterView = ({
               data={ocrDebugData}
               onPrepareNextCapture={(message) => {
                 setOcrCandidates([]);
-                setOcrMessage({ type: 'info', text: message });
+                setOcrMessage({ type: 'info', text: message, language });
               }}
             />
           </Suspense>
@@ -956,6 +1002,8 @@ export const RegisterView = ({
           />
         </Suspense>
       )}
+
+      {isCameraOpen && <SerialCameraModal onAccept={handleCameraAccept} onClose={() => setIsCameraOpen(false)} />}
 
     </div>
   );

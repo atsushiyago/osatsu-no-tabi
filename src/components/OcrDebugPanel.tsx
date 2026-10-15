@@ -271,23 +271,24 @@ export const OcrDebugPanel = ({ data, onPrepareNextCapture }: OcrDebugPanelProps
 
       {psmDiagnostics.length > 0 && (
         <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', fontFamily: 'monospace', lineHeight: 1.5, overflowX: 'auto' }}>
-          <div style={{ color: '#38bdf8', fontWeight: 700, marginBottom: '8px' }}>画像 / PSM / 白padding 比較（6基本条件 + padding版）</div>
+          <div style={{ color: '#38bdf8', fontWeight: 700, marginBottom: '8px' }}>単一画像の前処理 / PSM比較</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11px' }}>
             <thead>
               <tr style={{ color: '#94a3b8', borderBottom: '1px solid #475569' }}>
-                {['Image variant', 'PSM', 'Padding', 'Raw text', '空白除去後', 'Confidence', 'Time', '形式', 'Error'].map((heading) => (
+                {['Image variant', 'PSM', 'Size', 'Raw text', '空白除去後', '候補', 'Confidence', 'Time', '形式', 'Error'].map((heading) => (
                   <th key={heading} style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{heading}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {psmDiagnostics.map((result, index) => (
-                <tr key={`${result.imageVariant}-${result.psmName}-${result.padding}-${index}`} style={{ borderBottom: '1px solid #334155' }}>
+                <tr key={`${result.imageVariant}-${result.psm}-${index}`} style={{ borderBottom: '1px solid #334155' }}>
                   <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.imageVariant}</td>
-                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.psmName}</td>
-                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.padding ? `ON (+${result.paddingPx}px)` : 'OFF'}</td>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>PSM {result.psm} ({result.psmName})</td>
+                  <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.width}×{result.height}</td>
                   <td style={{ padding: '5px 7px', whiteSpace: 'pre-wrap' }}>{result.rawText || '(empty)'}</td>
                   <td style={{ padding: '5px 7px' }}>{result.compactText || '(empty)'}</td>
+                  <td style={{ padding: '5px 7px' }}>{result.candidates.join(', ') || '(none)'}</td>
                   <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.confidence.toFixed(1)}%</td>
                   <td style={{ padding: '5px 7px', whiteSpace: 'nowrap' }}>{result.durationMs.toFixed(0)} ms</td>
                   <td style={{ padding: '5px 7px', color: result.isValid ? '#4ade80' : '#fca5a5' }}>
