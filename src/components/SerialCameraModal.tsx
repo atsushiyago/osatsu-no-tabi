@@ -3,6 +3,7 @@ import { Check, X } from 'lucide-react';
 import { useI18n } from '../useI18n';
 import { getDisplayedSerialGuide, getSourceCropFromDisplay, type PixelCropRect } from '../utils/cameraCapture';
 import { isDebugTiming } from '../utils/debug';
+import { getModalViewportHeight } from '../utils/modalViewport';
 import { normalizeSerialInput, validateSerialNumber } from '../utils/serial';
 import type { SerialScanObservation, RealtimeSerialOcrSession } from '../utils/ocr';
 import type { TranslationKey } from '../i18n';
@@ -37,7 +38,7 @@ export const SerialCameraModal = ({ onAccept, onClose }: SerialCameraModalProps)
   const previewUrlsRef = useRef<string[]>([]);
   const [cameraState, setCameraState] = useState<'starting' | 'ready' | 'review' | 'error'>('starting');
   const [cameraRun, setCameraRun] = useState(0);
-  const [visualViewportBox, setVisualViewportBox] = useState(() => ({ top: 0, height: 0 }));
+  const [visibleHeight, setVisibleHeight] = useState<number | undefined>();
   const [cameraError, setCameraError] = useState<TranslationKey | null>(null);
   const [guide, setGuide] = useState<PixelCropRect | null>(null);
   const [history, setHistory] = useState<SerialScanObservation[]>([]);
@@ -49,14 +50,12 @@ export const SerialCameraModal = ({ onAccept, onClose }: SerialCameraModalProps)
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    const updateViewport = () => setVisualViewportBox({ top: viewport.offsetTop, height: viewport.height });
+    const updateViewport = () => setVisibleHeight(getModalViewportHeight(viewport.height, window.innerHeight));
     updateViewport();
     viewport.addEventListener('resize', updateViewport);
-    viewport.addEventListener('scroll', updateViewport);
     window.addEventListener('resize', updateViewport);
     return () => {
       viewport.removeEventListener('resize', updateViewport);
-      viewport.removeEventListener('scroll', updateViewport);
       window.removeEventListener('resize', updateViewport);
     };
   }, []);
@@ -253,7 +252,7 @@ export const SerialCameraModal = ({ onAccept, onClose }: SerialCameraModalProps)
 
   return (
     <div className="serial-camera-modal" role="dialog" aria-modal="true" aria-label={t('ocrCameraTitle')} style={{
-      position: 'fixed', insetInline: 0, top: visualViewportBox.top, bottom: 'auto', height: visualViewportBox.height || undefined, zIndex: 10000, display: 'flex', flexDirection: 'column',
+      position: 'fixed', insetInline: 0, top: 0, bottom: 'auto', height: visibleHeight, zIndex: 10000, display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'flex-start', gap: 10, boxSizing: 'border-box', width: '100%', minHeight: 0, overflow: 'hidden', overscrollBehavior: 'none', padding: 'max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left))',
       background: '#0f172a', color: '#fff',
     }}>
