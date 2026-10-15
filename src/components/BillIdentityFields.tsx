@@ -18,6 +18,7 @@ export function BillIdentityFields({ selection, onChange, disabled }: {
   const automatic = colors.length === 1;
   const automaticDesign = selection.series === 'F' || selection.denomination === 2000;
   if (automaticDesign) return <section className="identity-fields identity-auto-design" role="status" aria-live="polite" aria-atomic="true">
+    <small>{t(selection.series === 'F' ? 'identityFAutoStatus' : 'identity2000AutoStatus')}</small>
     <strong>{t(selection.series === 'F' ? 'identityFAuto' : 'identity2000Auto')}</strong>
     <span>{t(designs[`${selection.series ?? 'D'}${selection.denomination}`])}</span>
   </section>;
