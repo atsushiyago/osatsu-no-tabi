@@ -559,6 +559,52 @@ export const RegisterView = ({
             <span className="form-label-badge">{t('required')}</span>
           </label>
 
+          {/* OCR is local-only and is initialized only after an explicit user action. */}
+          <div style={{ marginTop: '8px' }}>
+            <button
+              type="button"
+              onClick={handleTriggerOcr}
+              disabled={isOcrProcessing}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                width: '100%',
+                minHeight: '48px',
+                boxSizing: 'border-box',
+                padding: '11px 16px',
+                backgroundColor: isOcrProcessing ? '#f1f5f9' : '#f8fafc',
+                color: isOcrProcessing ? '#94a3b8' : '#334155',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: isOcrProcessing ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              id="btn-ocr-camera"
+            >
+              {isOcrProcessing ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>{ocrStatusMessage || t('ocrProcessing')}</span>
+                </>
+              ) : (
+                <>
+                  <Camera size={16} color="#475569" />
+                  <span>{t('ocrCameraButton')}</span>
+                </>
+              )}
+            </button>
+            <div
+              aria-hidden="true"
+              style={{ textAlign: 'center', margin: '6px 0', color: '#64748b', fontSize: '11px', lineHeight: 1.4 }}
+            >
+              {t('orEnterManually')}
+            </div>
+          </div>
+
           <input
             id="serialInput"
             type="text"
@@ -651,42 +697,7 @@ export const RegisterView = ({
                 id="ocr-file-input"
               />}
 
-          {/* OCR is local-only and is initialized only after an explicit user action. */}
-          <div style={{ marginTop: '10px' }}>
-            <button
-              type="button"
-              onClick={handleTriggerOcr}
-              disabled={isOcrProcessing}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                width: '100%',
-                padding: '11px 16px',
-                backgroundColor: isOcrProcessing ? '#f1f5f9' : '#f8fafc',
-                color: isOcrProcessing ? '#94a3b8' : '#334155',
-                border: '1.5px solid #cbd5e1',
-                borderRadius: '10px',
-                fontSize: '13px',
-                fontWeight: 700,
-                cursor: isOcrProcessing ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              id="btn-ocr-camera"
-            >
-              {isOcrProcessing ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>{ocrStatusMessage || t('ocrProcessing')}</span>
-                </>
-              ) : (
-                <>
-                  <Camera size={16} color="#475569" />
-                  <span>{t('ocrCameraButton')}</span>
-                </>
-              )}
-            </button>
+          <div>
             {isTimingDebug && <button type="button" onClick={handleTriggerDebugFile} style={{ display: 'block', margin: '8px auto 0', minHeight: 36 }}>
               QA診断用の画像を選択
             </button>}

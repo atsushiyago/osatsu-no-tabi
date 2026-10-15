@@ -65,6 +65,8 @@ test('Google authentication errors are translated in the active language', () =>
 
 test('OCR camera review actions are localized in Japanese and English', () => {
   for (const language of ['ja', 'en']) {
+    assert.ok(translate(language, 'ocrCameraButton').length > 0);
+    assert.ok(translate(language, 'orEnterManually').length > 0);
     assert.ok(translate(language, 'ocrCameraReviewTitle').length > 0);
     assert.ok(translate(language, 'ocrCameraUseCandidate').length > 0);
     assert.ok(translate(language, 'ocrCameraRescan').length > 0);
