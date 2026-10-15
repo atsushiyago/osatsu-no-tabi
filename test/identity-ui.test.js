@@ -73,6 +73,15 @@ test('Japanese and English identity messages exist without changing internal cod
   assert.match(translate('en', 'designE10000'), /phoenix/);
 });
 
+test('automatic identity results retain localized F and D2000 details', () => {
+  assert.match(translate('ja', 'identityFAuto'), /F券.*黒色.*自動判定/);
+  assert.match(translate('en', 'identityFAuto'), /Series F.*black ink.*automatically/i);
+  assert.match(translate('ja', 'identity2000Auto'), /二千円札.*D券.*黒色/);
+  assert.match(translate('en', 'identity2000Auto'), /¥2,000.*Series D.*black ink/i);
+  assert.match(translate('ja', 'designF1000'), /北里柴三郎.*神奈川沖浪裏/);
+  assert.match(translate('en', 'designF1000'), /Kitasato Shibasaburo.*Great Wave/i);
+});
+
 test('v2 feature and emulator transport are independent and default off', () => {
   assert.equal(identityV2Enabled(undefined), false);
   assert.equal(identityV2Enabled('true'), true);

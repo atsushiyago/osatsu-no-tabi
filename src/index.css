@@ -1092,7 +1092,9 @@ body, .app-container { background: var(--bg-main); }
 .identity-auto-design > span { font-size: 1rem; line-height: 1.65; }
 .identity-options .identity-option > strong,
 .identity-auto-design > strong { font-size: 1.05rem; line-height: 1.5; }
-.identity-auto-design { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }
+.identity-auto-design { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 20px; padding: 12px 14px; border: 1px solid #c8ddd5; border-left: 4px solid #4b806e; border-radius: 8px; background: #f3f8f5; color: #33483f; overflow-wrap: anywhere; }
+.identity-auto-design > strong { color: #285b4b; }
+.identity-auto-design > span { color: #52665e; font-size: 0.95rem; line-height: 1.55; }
 
 .identity-confirmation { margin: 0 0 20px; }
 .identity-confirmation .input-hint { margin: 6px 0 8px; }
