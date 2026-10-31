@@ -1123,8 +1123,6 @@ body, .app-container { background: var(--bg-main); }
   height: 100dvh;
 }
 
-/* Home refresh is explicit; no idle Firestore polling. */
-.home-refresh { margin-bottom: 20px; }
-.home-refresh .btn-secondary { width: auto; min-height: 44px; padding: 8px 14px; font-size: 15px; }
-.home-refresh p { margin: 6px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
-.home-refresh [role="alert"] { color: #9f3b2f; }
+/* Home errors remain visible without reserving space when loading succeeds. */
+.home-errors { margin-bottom: 20px; }
+.home-errors p { margin: 6px 0 0; color: #9f3b2f; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }

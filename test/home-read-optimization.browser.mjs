@@ -63,7 +63,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   await page.goto('http://127.0.0.1:25174/');
-  const uid = await (await page.waitForFunction(() => window.__homeTestUid && !document.querySelector('.home-refresh button')?.disabled ? window.__homeTestUid : null)).jsonValue();
+  const uid = await (await page.waitForFunction(() => window.__homeTestUid && document.querySelector('.home-view')?.getAttribute('aria-busy') === 'false' ? window.__homeTestUid : null)).jsonValue();
   const ids = Array.from({ length: 45 }, opaque);
   const stamp = '2026-10-31T00:00:00Z';
   for (let index = 0; index < ids.length; index++) {
@@ -79,10 +79,10 @@ try {
     await adminSet(`sightings/browser-${index}`, { publicBillId: id, step: 1, municipality: '藤沢市', prefecture: '神奈川県', createdAt: stamp }, project);
   }
   await adminSet('sightings/browser-new', { publicBillId: ids[0], step: 2, municipality: '横浜市', prefecture: '神奈川県', createdAt: stamp }, project);
-  const ready = async () => page.waitForFunction(() => !document.querySelector('.home-refresh button')?.disabled);
+  const ready = async () => page.waitForFunction(() => document.querySelector('.home-view')?.getAttribute('aria-busy') === 'false');
   const counters = () => page.evaluate(() => ({ ...window.__homeReads }));
-  const home = async () => { await page.evaluate(() => { location.hash = '#/'; }); await page.locator('.home-refresh').waitFor(); await ready(); };
-  await page.locator('.home-refresh button').click();
+  const home = async () => { await page.evaluate(() => { location.hash = '#/'; }); await page.locator('.home-view').waitFor(); await ready(); };
+  await page.evaluate(() => { window.__clockOffset += 31_000; window.dispatchEvent(new Event('focus')); });
   await page.locator('.home-new-discovery').waitFor();
   await ready();
   const initial = await counters();
@@ -94,9 +94,24 @@ try {
   await page.waitForFunction((before) => window.__homeReads.notices > before.notices && window.__homeReads.public > before.public, initial);
   await ready();
   const expired = await counters();
-  await page.locator('.home-refresh button').click();
-  await page.waitForFunction((before) => window.__homeReads.notices > before.notices && window.__homeReads.public > before.public, expired);
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
   await ready();
+  assert.deepEqual(await counters(), expired, 'Focus and visibility return within 30 seconds reuse both caches');
+  await page.evaluate(() => { location.hash = '#/search'; });
+  await page.locator('#searchSerialInput').waitFor();
+  await page.evaluate(() => { window.__clockOffset += 31_000; });
+  await home();
+  assert.equal((await counters()).notices, expired.notices + 1, 'Expired Home return reloads notifications once');
+  assert.equal((await counters()).public, expired.public + 1, 'Expired Home return reloads public data once');
+  const returned = await counters();
+  await page.evaluate(() => { window.__clockOffset += 31_000; });
+  await page.waitForTimeout(300);
+  assert.deepEqual(await counters(), returned, 'Idle Home does not poll Firestore after cache expiry');
+  await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForFunction((before) => window.__homeReads.notices > before.notices && window.__homeReads.public > before.public, returned);
+  await ready();
+  assert.equal((await counters()).notices, returned.notices + 1, 'Visible tab return reloads expired notifications once');
+  assert.equal((await counters()).public, returned.public + 1, 'Visible tab return reloads expired public data once');
   await page.evaluate((id) => { location.hash = '#/bill/' + id; }, ids[0]);
   await page.waitForFunction(() => document.querySelector('.bill-detail-hero'));
   for (let i = 0; i < 40; i++) {
@@ -109,13 +124,14 @@ try {
   assert.equal(await page.locator('.home-new-discovery').count(), 0, 'Seen update invalidates notification cache');
   for (const language of ['English', '日本語']) {
     await page.getByRole('button', { name: language, exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: /最新情報に更新|Refresh updates/ }).count(), 0, 'Manual refresh button is absent in ' + language);
     for (const width of [320, 375, 390, 430]) {
       await page.setViewportSize({ width, height: 844 });
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      assert.equal(await page.locator('.home-refresh').evaluate((element) => {
+      assert.equal(await page.locator('.home-view').evaluate((element) => {
         const bounds = element.getBoundingClientRect();
         return bounds.left >= 0 && bounds.right <= innerWidth && element.scrollWidth <= element.clientWidth;
-      }), true, 'Refresh controls and explanation fit the viewport');
+      }), true, 'Home fits the viewport without refresh controls');
     }
   }
   await page.evaluate(() => { location.hash = '#/my-bills'; });
@@ -131,7 +147,7 @@ try {
   assert.equal((await counters()).followingPages - beforeRestore.followingPages, 2, 'Restoration loads two pages, without a third reset request');
   assert.equal(await page.locator('[data-public-bill-id]').count(), 45, 'Restoration retains all loaded rows');
   assert.equal(violations.length, 0);
-  console.log('PASS: Home cache hit/expiry/manual refresh, seen invalidation, following-list restore, JA/EN 320–430px; external Firebase attempts: 0');
+  console.log('PASS: Home cache hit/automatic expiry on return and focus, seen invalidation, following-list restore, JA/EN 320–430px; external Firebase attempts: 0');
 } finally {
   await browser?.close();
   await server.close();

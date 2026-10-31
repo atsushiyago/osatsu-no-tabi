@@ -153,12 +153,6 @@ export function App() {
     };
   }, [currentView]);
 
-  const refreshHome = () => {
-    invalidateHomeNotifications();
-    invalidateHomePublicData();
-    setTrackedBillsRefreshKey((key) => key + 1);
-  };
-
   const clearBillReturnForRestore = useCallback(() => {
     setBillReturnForRestore(null);
   }, []);
@@ -578,7 +572,6 @@ export function App() {
             notificationsError={currentTrackedBillsResult?.error ?? false}
             notificationsLoading={Boolean(authUid) && currentTrackedBillsResult === null}
             refreshKey={trackedBillsRefreshKey}
-            onRefresh={refreshHome}
             onNavigateTrackedBills={() => navigateTo('tracked')}
             onNavigateBills={() => navigateTo('bills')}
             restoreTargetBillId={billReturnForRestore?.hash === '#/' ? billReturnForRestore.publicBillId : null}

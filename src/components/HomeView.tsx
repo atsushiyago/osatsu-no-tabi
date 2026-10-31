@@ -25,7 +25,6 @@ interface HomeViewProps {
   notificationsError: boolean;
   notificationsLoading: boolean;
   refreshKey: number;
-  onRefresh: () => void;
   onNavigateTrackedBills: () => void;
   onNavigateBills: () => void;
   restoreTargetBillId: string | null;
@@ -39,7 +38,6 @@ export const HomeView = ({
   notificationsError,
   notificationsLoading,
   refreshKey,
-  onRefresh,
   onNavigateTrackedBills,
   onNavigateBills,
   restoreTargetBillId,
@@ -171,13 +169,13 @@ export const HomeView = ({
   }, [loading, onRestoreComplete, recentJourneys, restoreTargetBillId]);
 
   return (
-    <div>
-      <div className="home-refresh">
-        <button type="button" className="btn-secondary" onClick={onRefresh} disabled={loading || notificationsLoading}>{t('homeRefresh')}</button>
-        <p>{t('homeRefreshHint')}</p>
-        {notificationsError && <p role="alert">{t('homeNotificationsError')}</p>}
-        {loadError && <p role="alert">{t('loadError')}</p>}
-      </div>
+    <div className="home-view" aria-busy={loading || notificationsLoading}>
+      {(notificationsError || loadError) && (
+        <div className="home-errors">
+          {notificationsError && <p role="alert">{t('homeNotificationsError')}</p>}
+          {loadError && <p role="alert">{t('loadError')}</p>}
+        </div>
+      )}
       {newTrackedBills.length > 0 && (
         <section className="home-new-discovery" aria-labelledby="home-new-discovery-title">
           <div className="home-new-discovery-copy">
