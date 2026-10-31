@@ -85,13 +85,11 @@ test('serial confirmation copy distinguishes input confirmation from final regis
 test('Google merge confirmation is concise and omits zero-count breakdowns in both languages', () => {
   const counts = { copyCount: 1, duplicateCount: 0, alreadyCopiedCount: 0 };
   assert.equal(formatGoogleMergeConfirmation('ja', counts), [
-    'Googleアカウントに統合します',
     '登録したお札の情報をGoogleアカウントにコピーします。元の情報もそのまま残ります。',
     '新たにコピーするお札：1枚',
     '続行しますか？',
   ].join('\n\n'));
   assert.equal(formatGoogleMergeConfirmation('en', counts), [
-    'Merge into your Google Account',
     'Your banknote information will be copied to your Google Account. The original information will remain.',
     'Banknotes to copy: 1',
     'Continue?',
