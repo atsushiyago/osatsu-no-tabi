@@ -8,9 +8,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import type { GlobalStats, BillWithSightings } from '../types';
-import { getGlobalStats, getRecentJourneys } from '../services/billService';
+import { getHomePublicData } from '../services/billService';
 import { SAMPLE_JOURNEYS } from '../data/sampleJourneys';
-import type { TrackedBillRow } from '../services/trackedBills';
+import type { HomeTrackedBillNotice } from '../services/homeTrackedBills';
 import { getUnseenTrackedBills } from '../utils/trackedBillState.js';
 import { getLatestPublicSightingRoute } from '../utils/journeyRoute';
 import { JourneyBillCard } from './JourneyBillCard';
@@ -21,7 +21,11 @@ interface HomeViewProps {
   onNavigateRegister: (initialSerial?: string) => void;
   onNavigateSearch: () => void;
   onSelectBill: (publicBillId: string) => void;
-  trackedBills: TrackedBillRow[] | null;
+  trackedBills: HomeTrackedBillNotice[] | null;
+  notificationsError: boolean;
+  notificationsLoading: boolean;
+  refreshKey: number;
+  onRefresh: () => void;
   onNavigateTrackedBills: () => void;
   onNavigateBills: () => void;
   restoreTargetBillId: string | null;
@@ -32,6 +36,10 @@ export const HomeView = ({
   onNavigateRegister,
   onSelectBill,
   trackedBills,
+  notificationsError,
+  notificationsLoading,
+  refreshKey,
+  onRefresh,
   onNavigateTrackedBills,
   onNavigateBills,
   restoreTargetBillId,
@@ -42,6 +50,7 @@ export const HomeView = ({
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [recentJourneys, setRecentJourneys] = useState<BillWithSightings[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const displayedJourneys = loading
     ? []
     : [
@@ -50,7 +59,7 @@ export const HomeView = ({
       ];
   const newTrackedBills = trackedBills ? getUnseenTrackedBills(trackedBills) : [];
   const leadingNewBill = newTrackedBills[0];
-  const latestPublicSightingRoute = getLatestPublicSightingRoute(leadingNewBill?.bill.sightings);
+  const latestPublicSightingRoute = getLatestPublicSightingRoute(leadingNewBill?.routeSightings);
 
   useLayoutEffect(() => {
     const heading = heroTitleRef.current;
@@ -135,22 +144,23 @@ export const HomeView = ({
   }, [language]);
 
   useEffect(() => {
+    let active = true;
     async function loadData() {
+      setLoading(true);
+      setLoadError(false);
       try {
-        const [statsData, journeysData] = await Promise.all([
-          getGlobalStats(),
-          getRecentJourneys(8),
-        ]);
-        setStats(statsData);
-        setRecentJourneys(journeysData);
+        const { stats, journeys } = await getHomePublicData();
+        if (active) { setStats(stats); setRecentJourneys(journeys); }
       } catch (err) {
         console.error('Failed to load home data', err);
+        if (active) setLoadError(true);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
-    loadData();
-  }, []);
+    void loadData();
+    return () => { active = false; };
+  }, [refreshKey]);
 
   useEffect(() => {
     if (loading || !restoreTargetBillId) return;
@@ -162,6 +172,12 @@ export const HomeView = ({
 
   return (
     <div>
+      <div className="home-refresh">
+        <button type="button" className="btn-secondary" onClick={onRefresh} disabled={loading || notificationsLoading}>{t('homeRefresh')}</button>
+        <p>{t('homeRefreshHint')}</p>
+        {notificationsError && <p role="alert">{t('homeNotificationsError')}</p>}
+        {loadError && <p role="alert">{t('loadError')}</p>}
+      </div>
       {newTrackedBills.length > 0 && (
         <section className="home-new-discovery" aria-labelledby="home-new-discovery-title">
           <div className="home-new-discovery-copy">

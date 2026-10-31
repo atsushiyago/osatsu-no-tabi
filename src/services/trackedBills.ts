@@ -19,8 +19,10 @@ import { countTrackedBillDocuments } from './trackedBillCount.js';
 import { db } from './firebase';
 import type { BillWithSightings } from '../types';
 import { getPublicBillById } from './billService';
-import { resolveLastSeenBaseline, sortTrackedBillRows } from '../utils/trackedBillState.js';
+import { resolveLastSeenBaseline } from '../utils/trackedBillState.js';
 import { getPageWindow } from '../utils/publicBillPagination.js';
+import { loadHomeTrackedBills, type HomeTrackedBillNotice } from './homeTrackedBills';
+import { createShortReadCache, HOME_READ_TTL_MS } from '../utils/shortReadCache';
 
 export const TRACKED_BILLS_PAGE_SIZE = 20;
 export type TrackedBillsCursor = QueryDocumentSnapshot<DocumentData>;
@@ -85,12 +87,13 @@ async function loadTrackedBillRows(
   return rows.filter((row): row is TrackedBillRow => row !== null);
 }
 
-export async function getTrackedBills(uid: string): Promise<TrackedBillRow[]> {
-  const firestore = db;
-  if (!firestore) throw new Error('Firestore is unavailable');
-  const trackedSnap = await getDocs(collection(firestore, 'users', uid, 'trackedBills'));
-  const rows = await loadTrackedBillRows(trackedSnap.docs, true);
-  return sortTrackedBillRows(rows);
+const homeNotices = createShortReadCache<HomeTrackedBillNotice[]>(HOME_READ_TTL_MS);
+export function invalidateHomeNotifications() { homeNotices.clear(); }
+export function getHomeNotifications(uid: string): Promise<HomeTrackedBillNotice[]> {
+  return homeNotices.get(uid, () => {
+    if (!db) throw new Error('Firestore is unavailable');
+    return loadHomeTrackedBills(db, uid);
+  });
 }
 
 export async function getTrackedBillsPage(
@@ -140,4 +143,5 @@ export async function markTrackedBillSeen(
     lastSeenAt: serverTimestamp(),
     lastSeenMunicipality: municipality,
   });
+  invalidateHomeNotifications();
 }

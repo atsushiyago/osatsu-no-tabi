@@ -13,7 +13,9 @@ import { TimingMonitor } from './components/TimingMonitor';
 import { TrackedBillsView } from './components/TrackedBillsView';
 import { PublicBillsView } from './components/PublicBillsView';
 import { ensureAnonymousUser, observeAuthState } from './services/firebase';
-import { getTrackedBills, getTrackedBillsCount, type TrackedBillRow } from './services/trackedBills';
+import { getHomeNotifications, invalidateHomeNotifications, getTrackedBillsCount } from './services/trackedBills';
+import type { HomeTrackedBillNotice } from './services/homeTrackedBills';
+import { invalidateHomePublicData } from './services/billService';
 import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
 import { cleanupCompletedTrackedBillMerge, mergeTrackedBillsWithConsent, previewTrackedBillMerge, type TrackedBillMergePreview, type TrackedBillMergeProgress, type TrackedBillMergeStage } from './services/trackedBillMerge';
 import { useI18n } from './useI18n';
@@ -23,7 +25,7 @@ type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked' | 'bills';
 type TrackedBillsLoadResult = {
   uid: string;
   refreshKey: number;
-  rows: TrackedBillRow[] | null;
+  rows: HomeTrackedBillNotice[] | null;
   error: boolean;
 };
 type BillReturnContext = {
@@ -95,7 +97,10 @@ export function App() {
   }, [currentView, routeRevision]);
 
   useEffect(() => {
+    let previousUid: string | null | undefined;
     const unsubscribe = observeAuthState((user) => {
+      if (previousUid !== (user?.uid ?? null)) invalidateHomeNotifications();
+      previousUid = user?.uid ?? null;
       setAuthUid(user?.uid ?? null);
       const syncState = getGoogleSyncState(user);
       setAuthIsAnonymous(syncState === 'anonymous');
@@ -107,6 +112,7 @@ export function App() {
         });
       }
     }, (error) => {
+      invalidateHomeNotifications();
       console.warn('Firebase Auth state unavailable; public features remain enabled:', error);
       setAuthUid(null);
       setAuthReady(true);
@@ -118,7 +124,7 @@ export function App() {
     if (currentView !== 'home') return;
     if (!authUid) return;
     let active = true;
-    getTrackedBills(authUid)
+    getHomeNotifications(authUid)
       .then((rows) => {
         if (active) setTrackedBillsResult({ uid: authUid, refreshKey: trackedBillsRefreshKey, rows, error: false });
       })
@@ -132,6 +138,26 @@ export function App() {
   const currentTrackedBillsResult = trackedBillsResult?.uid === authUid &&
     trackedBillsResult.refreshKey === trackedBillsRefreshKey ? trackedBillsResult : null;
   const trackedBills = currentTrackedBillsResult?.rows ?? null;
+
+  // No idle polling: revalidate expired entries when a visible Home regains focus.
+  useEffect(() => {
+    if (currentView !== 'home') return;
+    const revisit = () => {
+      if (document.visibilityState === 'visible') setTrackedBillsRefreshKey((key) => key + 1);
+    };
+    window.addEventListener('focus', revisit);
+    document.addEventListener('visibilitychange', revisit);
+    return () => {
+      window.removeEventListener('focus', revisit);
+      document.removeEventListener('visibilitychange', revisit);
+    };
+  }, [currentView]);
+
+  const refreshHome = () => {
+    invalidateHomeNotifications();
+    invalidateHomePublicData();
+    setTrackedBillsRefreshKey((key) => key + 1);
+  };
 
   const clearBillReturnForRestore = useCallback(() => {
     setBillReturnForRestore(null);
@@ -237,6 +263,8 @@ export function App() {
   };
 
   const handleRegisterSuccess = (result: RegisterResult, trackingFailed = false) => {
+    invalidateHomeNotifications();
+    invalidateHomePublicData();
     setTrackingNotice(trackingFailed);
     if (result.isRediscovery) {
       setRegistrationCompletedBillId(null);
@@ -261,6 +289,7 @@ export function App() {
     const { user } = await signInWithCredential(auth!, credential);
     reportGoogleSyncStage('primary-auth-switched');
     if (user.uid !== targetUid) throw new Error('The authenticated Google UID changed during merge');
+    invalidateHomeNotifications();
     setAuthUid(user.uid);
     setAuthIsAnonymous(false);
     setAuthIsGoogleLinked(user.providerData.some((entry) => entry.providerId === 'google.com'));
@@ -375,6 +404,7 @@ export function App() {
         getCredentialFromError: (error) => GoogleAuthProvider.credentialFromError(error as FirebaseError),
         signInWithCredential: async (credential) => (await signInWithCredential(auth!, credential)).user,
         onUserSwitched: (user) => {
+          invalidateHomeNotifications();
           setAuthUid(user.uid);
           setAuthIsAnonymous(false);
           setAuthIsGoogleLinked(user.providerData.some((entry) => entry.providerId === 'google.com'));
@@ -399,6 +429,7 @@ export function App() {
       });
 
       if (result.status === 'linked') {
+        invalidateHomeNotifications();
         console.info('[Google sync] Anonymous UID preserved:', result.previousUid === result.uid);
         setAuthUid(result.uid);
         setAuthIsAnonymous(false);
@@ -544,6 +575,10 @@ export function App() {
             onNavigateSearch={() => navigateTo('search')}
             onSelectBill={(publicBillId) => navigateTo('bill', publicBillId)}
             trackedBills={authUid ? trackedBills : null}
+            notificationsError={currentTrackedBillsResult?.error ?? false}
+            notificationsLoading={Boolean(authUid) && currentTrackedBillsResult === null}
+            refreshKey={trackedBillsRefreshKey}
+            onRefresh={refreshHome}
             onNavigateTrackedBills={() => navigateTo('tracked')}
             onNavigateBills={() => navigateTo('bills')}
             restoreTargetBillId={billReturnForRestore?.hash === '#/' ? billReturnForRestore.publicBillId : null}

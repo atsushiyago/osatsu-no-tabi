@@ -69,6 +69,8 @@ export function TrackedBillsView({
   const initialRestoreRef = useRef({
     billId: restoreTargetBillId,
     visibleCount: restoreVisibleCount,
+    followingBillId: followingRestoreTargetBillId,
+    listKind: restoreListKind,
   });
   const newBillCount = getUnseenTrackedBills(rows).length;
 
@@ -123,6 +125,7 @@ export function TrackedBillsView({
 
   useEffect(() => {
     let active = true;
+    const { followingBillId: targetBillId, listKind, visibleCount } = initialRestoreRef.current;
     const loadFollowing = async () => {
       let loadedRows: TrackedBillRow[] = [];
       let nextCursor: TrackedBillsCursor | null = null;
@@ -133,9 +136,9 @@ export function TrackedBillsView({
         nextCursor = page.nextCursor;
         hasMorePages = page.hasMore;
         while (
-          active && restoreListKind === 'following' && followingRestoreTargetBillId && restoreVisibleCount !== null &&
-          nextCursor && (loadedRows.length < restoreVisibleCount ||
-            !loadedRows.some((row) => row.bill.id === followingRestoreTargetBillId))
+          active && listKind === 'following' && targetBillId && visibleCount !== null &&
+          nextCursor && (loadedRows.length < visibleCount ||
+            !loadedRows.some((row) => row.bill.id === targetBillId))
         ) {
           page = await getTrackedBillsPage(uid, nextCursor, false);
           loadedRows.push(...page.rows);
@@ -162,7 +165,7 @@ export function TrackedBillsView({
     };
     void loadFollowing();
     return () => { active = false; };
-  }, [followingRetryKey, followingRestoreTargetBillId, restoreListKind, restoreVisibleCount, uid]);
+  }, [followingRetryKey, uid]);
 
   useEffect(() => {
     if (loading || !restoreTargetBillId) return;

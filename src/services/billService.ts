@@ -34,6 +34,16 @@ import { normalizeSerialNumber } from '../utils/serial';
 import { startTiming } from '../utils/timing';
 import { isDebugTiming } from '../utils/debug';
 import { getPageWindow, projectPublicBill } from '../utils/publicBillPagination.js';
+import { createShortReadCache, HOME_READ_TTL_MS } from '../utils/shortReadCache';
+
+const homePublicData = createShortReadCache<{ stats: GlobalStats; journeys: BillWithSightings[] }>(HOME_READ_TTL_MS);
+export function invalidateHomePublicData() { homePublicData.clear(); }
+export function getHomePublicData() {
+  return homePublicData.get('public', async () => {
+    const [stats, journeys] = await Promise.all([getGlobalStats(), getRecentJourneys(8)]);
+    return { stats, journeys };
+  });
+}
 
 export const PUBLIC_BILLS_PAGE_SIZE = 20;
 export type PublicBillsCursor = QueryDocumentSnapshot<DocumentData>;
