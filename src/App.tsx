@@ -19,6 +19,7 @@ import { invalidateHomePublicData } from './services/billService';
 import { getGoogleSyncErrorMessage, getGoogleSyncState, syncGoogleAccount } from './services/googleAccountSync.js';
 import { cleanupCompletedTrackedBillMerge, mergeTrackedBillsWithConsent, previewTrackedBillMerge, type TrackedBillMergePreview, type TrackedBillMergeProgress, type TrackedBillMergeStage } from './services/trackedBillMerge';
 import { useI18n } from './useI18n';
+import { formatGoogleMergeConfirmation } from './i18n';
 import { IDENTITY_EMULATOR_PROJECT } from './utils/identityEnvironment';
 
 type ViewMode = 'home' | 'register' | 'search' | 'bill' | 'tracked' | 'bills';
@@ -333,17 +334,7 @@ export function App() {
         targetUid: target.uid,
         preview,
         confirm: () => {
-          const accepted = window.confirm([
-            t('mergeConfirmTitle'),
-            '',
-            t('mergeConfirmCounts', {
-              copyCount: preview.copyCount,
-              duplicateCount: preview.duplicateCount,
-              alreadyCopiedCount: preview.alreadyCopiedCount,
-            }),
-            '',
-            t('mergeConfirmDetails'),
-          ].join('\n'));
+          const accepted = window.confirm(formatGoogleMergeConfirmation(language, preview));
           reportGoogleSyncStage(accepted ? 'merge-consent-accepted' : 'merge-consent-cancelled');
           return accepted;
         },

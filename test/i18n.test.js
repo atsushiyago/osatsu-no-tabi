@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dictionaries, detectLanguage, formatDate, formatYen, getInitialLanguage, LANGUAGE_STORAGE_KEY, saveLanguagePreference, translate } from '../src/i18n.ts';
+import { dictionaries, detectLanguage, formatGoogleMergeConfirmation, formatDate, formatYen, getInitialLanguage, LANGUAGE_STORAGE_KEY, saveLanguagePreference, translate } from '../src/i18n.ts';
 import { JAPAN_CITIES, PREFECTURES, getLocalizedLocationLabel, getLocalizedPlaceName } from '../src/utils/geo.ts';
 import { validateSerialNumber } from '../src/utils/serial.ts';
 import { getGoogleSyncErrorMessage } from '../src/services/googleAccountSync.js';
@@ -79,4 +79,40 @@ test('OCR camera review actions are localized in Japanese and English', () => {
 test('serial confirmation copy distinguishes input confirmation from final registration', () => {
   assert.match(translate('ja', 'identityConfirmHelp'), /お札の登録は.*最後の登録ボタン/);
   assert.match(translate('en', 'identityConfirmHelp'), /serial number only.*not registered until.*final registration button/i);
+});
+
+
+test('Google merge confirmation is concise and omits zero-count breakdowns in both languages', () => {
+  const counts = { copyCount: 1, duplicateCount: 0, alreadyCopiedCount: 0 };
+  assert.equal(formatGoogleMergeConfirmation('ja', counts), [
+    'Googleアカウントに統合します',
+    '登録したお札の情報をGoogleアカウントにコピーします。元の情報もそのまま残ります。',
+    '新たにコピーするお札：1枚',
+    '続行しますか？',
+  ].join('\n\n'));
+  assert.equal(formatGoogleMergeConfirmation('en', counts), [
+    'Merge into your Google Account',
+    'Your banknote information will be copied to your Google Account. The original information will remain.',
+    'Banknotes to copy: 1',
+    'Continue?',
+  ].join('\n\n'));
+  assert.deepEqual(counts, { copyCount: 1, duplicateCount: 0, alreadyCopiedCount: 0 });
+});
+
+test('Google merge confirmation preserves nonzero duplicate and resume information', () => {
+  for (const language of ['ja', 'en']) {
+    const message = formatGoogleMergeConfirmation(language, { copyCount: 12, duplicateCount: 2, alreadyCopiedCount: 3 });
+    for (const [key, count] of [['mergeConfirmCopyCount', 12], ['mergeConfirmDuplicateCount', 2], ['mergeConfirmAlreadyCopiedCount', 3]]) {
+      assert.ok(message.includes(translate(language, key, { count })));
+    }
+    assert.ok(!message.includes('一時的'));
+    assert.ok(!message.includes('paused'));
+    const duplicatesOnly = formatGoogleMergeConfirmation(language, { copyCount: 0, duplicateCount: 2, alreadyCopiedCount: 0 });
+    assert.ok(!duplicatesOnly.includes(translate(language, 'mergeConfirmCopyCount', { count: 0 })));
+    assert.ok(!duplicatesOnly.includes(translate(language, 'mergeConfirmAlreadyCopiedCount', { count: 0 })));
+    assert.ok(duplicatesOnly.includes(translate(language, 'mergeConfirmDuplicateCount', { count: 2 })));
+    const resumed = formatGoogleMergeConfirmation(language, { copyCount: 0, duplicateCount: 0, alreadyCopiedCount: 4 });
+    assert.ok(resumed.includes(translate(language, 'mergeConfirmAlreadyCopiedCount', { count: 4 })));
+    assert.ok(!resumed.includes(translate(language, 'mergeConfirmDuplicateCount', { count: 0 })));
+  }
 });
