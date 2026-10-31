@@ -4,6 +4,7 @@ import {
   getUnseenSightingsCount,
   getUnseenTrackedBills,
   resolveLastSeenBaseline,
+  resolveOwnedNotificationBaseline,
   sortTrackedBillRows,
 } from '../src/utils/trackedBillState.js';
 import { getLatestPublicSightingRoute } from '../src/utils/journeyRoute.ts';
@@ -29,7 +30,7 @@ test('Home and My Bills share the same unseen bill selection', () => {
   assert.deepEqual(getUnseenTrackedBills(rows).map((row) => row.id), ['new-one', 'new-three']);
 });
 
-test('missing legacy baseline is initialized quietly on first list load', () => {
+test('legacy read-only fallback stays quiet; owned notifications use a separate conservative baseline', () => {
   assert.deepEqual(resolveLastSeenBaseline(6, undefined), {
     lastSeenSightingsCount: 6,
     shouldPersistBaseline: true,
@@ -43,6 +44,21 @@ test('opening a list with a baseline does not acknowledge new sightings', () => 
     shouldPersistBaseline: false,
     unseenSightingsCount: 3,
   });
+});
+
+test('owned legacy notifications conservatively acknowledge only the initial registration', () => {
+  for (const missing of [undefined, null]) {
+    assert.deepEqual(resolveOwnedNotificationBaseline(6, missing), {
+      lastSeenSightingsCount: 1, shouldPersistBaseline: true, unseenSightingsCount: 5,
+    });
+    assert.equal(resolveOwnedNotificationBaseline(1, missing).unseenSightingsCount, 0);
+  }
+  for (const saved of [0, 1, 5, 6, 7]) {
+    const baseline = resolveOwnedNotificationBaseline(6, saved);
+    assert.equal(baseline.lastSeenSightingsCount, saved);
+    assert.equal(baseline.shouldPersistBaseline, false);
+    assert.equal(baseline.unseenSightingsCount, Math.max(0, 6 - saved));
+  }
 });
 
 test('newly discovered bills sort first, then by updatedAt', () => {

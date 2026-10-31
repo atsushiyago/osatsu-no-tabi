@@ -1,9 +1,11 @@
 import {
-  collection, doc, documentId, getDocs, query, updateDoc, where,
-  type Firestore,
+  collection, doc, documentId, getCountFromServer, getDocFromServer, getDocsFromServer,
+  limit, query, where,
+  type DocumentData, type Firestore, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import type { Bill, Sighting } from '../types/index.ts';
-import { resolveLastSeenBaseline, sortTrackedBillRows } from '../utils/trackedBillState.js';
+import { sortTrackedBillRows } from '../utils/trackedBillState.js';
+import { ensureOwnedNotificationBaseline } from './trackedBillBaseline.ts';
 
 export interface HomeTrackedBillNotice {
   bill: Bill;
@@ -11,35 +13,82 @@ export interface HomeTrackedBillNotice {
   routeSightings: Sighting[];
 }
 
-/** Check every owned tracking record, without loading every journey history. No new index required. */
-export async function loadHomeTrackedBills(db: Firestore, uid: string): Promise<HomeTrackedBillNotice[]> {
-  const tracked = await getDocs(query(collection(db, 'users', uid, 'trackedBills'), where('firstRegisteredByMe', '==', true)));
-  const valid = tracked.docs.filter((item) => typeof item.data().publicBillId === 'string' && typeof item.data().serialNumber === 'string');
-  const ids = [...new Set(valid.map((item) => item.data().publicBillId as string))];
+type TrackingRecord = { ref: ReturnType<typeof doc>; data: DocumentData };
+
+function validTracking(data: DocumentData) {
+  return data.firstRegisteredByMe === true
+    && typeof data.publicBillId === 'string' && typeof data.serialNumber === 'string';
+}
+
+function publicBill(item: QueryDocumentSnapshot<DocumentData>): Bill {
+  const data = item.data();
+  if (!Number.isInteger(data.sightingsCount) || data.sightingsCount < 1) {
+    throw new Error('Invalid public sighting count during notification check');
+  }
+  return { ...data, id: item.id } as Bill;
+}
+
+/** No new collection, index, Rules, or persistent migration marker is needed.
+ * `owned` keeps the previous complete scan available as an explicit rollback.
+ * Counts choose a plan only; a bounded result is never treated as a complete scan.
+ */
+export async function loadHomeTrackedBills(
+  db: Firestore, uid: string, options: { strategy?: 'auto' | 'owned' } = {},
+): Promise<HomeTrackedBillNotice[]> {
+  const owned = query(collection(db, 'users', uid, 'trackedBills'), where('firstRegisteredByMe', '==', true));
+  const rediscovered = query(collection(db, 'publicBills'), where('sightingsCount', '>', 1));
   const bills = new Map<string, Bill>();
-  // Batching reduces RPCs; it does not assume that one RPC is one billed document read.
-  for (let offset = 0; offset < ids.length; offset += 30) {
-    const result = await getDocs(query(collection(db, 'publicBills'), where(documentId(), 'in', ids.slice(offset, offset + 30))));
-    for (const item of result.docs) bills.set(item.id, { ...item.data(), id: item.id } as Bill);
+  let tracked: TrackingRecord[] | undefined;
+
+  if (options.strategy !== 'owned') {
+    const ownedCount = (await getCountFromServer(owned)).data().count;
+    if (ownedCount === 0) return [];
+    // Limit the aggregation too: a large global collection must not cause an
+    // unbounded index scan merely to decide to use the old plan.
+    const boundedRediscovered = query(rediscovered, limit(ownedCount + 1));
+    const globalCount = (await getCountFromServer(boundedRediscovered)).data().count;
+    if (globalCount < ownedCount) {
+      const candidates = await getDocsFromServer(boundedRediscovered);
+      for (const item of candidates.docs) bills.set(item.id, publicBill(item));
+      if (candidates.size <= ownedCount) {
+        tracked = [];
+        // Every candidate is checked; bound concurrency, not the result set.
+        for (let offset = 0; offset < candidates.docs.length; offset += 30) {
+          const records = await Promise.all(candidates.docs.slice(offset, offset + 30).map(async (item) => {
+            const ref = doc(db, 'users', uid, 'trackedBills', item.id);
+            const snapshot = await getDocFromServer(ref);
+            const data = snapshot.data();
+            return data && validTracking(data) && data.publicBillId === item.id ? { ref, data } : null;
+          }));
+          tracked.push(...records.filter((item): item is TrackingRecord => item !== null));
+        }
+      }
+      // Growth between count and fetch can fill the bound. Fall through to the
+      // full owned scan and reuse any public summaries already obtained.
+    }
+  }
+
+  if (!tracked) {
+    const snapshot = await getDocsFromServer(owned);
+    tracked = snapshot.docs.filter((item) => validTracking(item.data()))
+      .map((item) => ({ ref: item.ref, data: item.data() }));
+    const ids = [...new Set(tracked.map((item) => item.data.publicBillId as string))].filter((id) => !bills.has(id));
+    for (let offset = 0; offset < ids.length; offset += 30) {
+      const result = await getDocsFromServer(query(collection(db, 'publicBills'), where(documentId(), 'in', ids.slice(offset, offset + 30))));
+      for (const item of result.docs) bills.set(item.id, publicBill(item));
+    }
   }
   const notices: HomeTrackedBillNotice[] = [];
-  for (const item of valid) {
-    const entry = item.data();
-    const bill = bills.get(entry.publicBillId);
+  for (const { ref, data } of tracked) {
+    const bill = bills.get(data.publicBillId);
     if (!bill) continue; // Preserve the existing treatment of a missing public bill.
-    const baseline = resolveLastSeenBaseline(bill.sightingsCount, entry.lastSeenSightingsCount);
-    if (baseline.shouldPersistBaseline) {
-      // Preserve the existing one-time, quiet legacy baseline. Never acknowledge an existing baseline.
-      try { await updateDoc(doc(db, 'users', uid, 'trackedBills', item.id), { lastSeenSightingsCount: baseline.lastSeenSightingsCount }); }
-      catch { console.warn('Could not save tracked bill baseline; using current count for this visit.'); }
-    }
+    const baseline = await ensureOwnedNotificationBaseline(db, ref, bill.id, bill.sightingsCount, data.lastSeenSightingsCount);
     if (baseline.unseenSightingsCount > 0) notices.push({ bill, unseenSightingsCount: baseline.unseenSightingsCount, routeSightings: [] });
   }
   const sorted = sortTrackedBillRows(notices);
   const leading = sorted[0];
   if (leading) {
-    // Home displays a route for only this bill. Keep the existing query to avoid a new composite index.
-    const history = await getDocs(query(collection(db, 'sightings'), where('publicBillId', '==', leading.bill.id)));
+    const history = await getDocsFromServer(query(collection(db, 'sightings'), where('publicBillId', '==', leading.bill.id)));
     leading.routeSightings = history.docs.map((item) => ({ ...item.data(), id: item.id } as Sighting)).sort((a, b) => a.step - b.step);
   }
   return sorted;

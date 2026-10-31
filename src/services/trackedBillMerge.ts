@@ -2,6 +2,7 @@ import {
   collection, deleteDoc, doc, getDoc, getDocs, runTransaction, serverTimestamp,
   setDoc, Timestamp, updateDoc, type DocumentData, type Firestore,
 } from 'firebase/firestore';
+import { ensureOwnedNotificationBaseline } from './trackedBillBaseline.ts';
 
 export interface TrackedBillMergePreview {
   totalCount: number;
@@ -13,6 +14,8 @@ export interface TrackedBillMergePreview {
   sourceBillIds: string[];
   staleTicketId: string | null;
   staleTargetUid: string | null;
+  /** Local preview metadata only; never persisted in the ticket or snapshot. */
+  uninitializedOwnedBillIds?: string[];
 }
 
 export interface TrackedBillMergeProgress {
@@ -102,6 +105,9 @@ export async function previewTrackedBillMerge(
     sourceBillIds: [...sourceIds],
     staleTicketId: !active ? lockTicketId : null,
     staleTargetUid: !active && typeof lock?.targetUid === 'string' ? lock.targetUid : null,
+    uninitializedOwnedBillIds: sourceSnapshot.docs.filter((snapshot) =>
+      snapshot.data().firstRegisteredByMe === true && !Number.isInteger(snapshot.data().lastSeenSightingsCount),
+    ).map((snapshot) => snapshot.id),
   };
 }
 
@@ -125,6 +131,14 @@ async function createOrResumeTicket(
         .map((snapshot) => deleteDoc(snapshot.ref)));
       try { await deleteDoc(ticketRef(targetDb, targetUid, preview.staleTicketId)); } catch { /* Expired artifact can be removed by its owner later. */ }
     }
+  }
+
+  // The Home feed intentionally does not visit undiscovered legacy bills.
+  // Fill their existing baseline only after consent, before the source lock
+  // makes metadata immutable. Exports require that field under existing Rules.
+  // The transaction rereads the source, so a newer acknowledgement wins.
+  for (const billId of preview.uninitializedOwnedBillIds ?? []) {
+    await ensureOwnedNotificationBaseline(sourceDb, trackedRef(sourceDb, sourceUid, billId), billId, 1, undefined);
   }
 
   const newTicket = doc(collection(targetDb, 'users', targetUid, 'trackedBillMergeTickets'));

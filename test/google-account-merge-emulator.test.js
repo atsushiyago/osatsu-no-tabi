@@ -9,6 +9,7 @@ import {
   collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc, where,
 } from 'firebase/firestore';
 import { cleanupCompletedTrackedBillMerge, mergeTrackedBillsWithConsent, previewTrackedBillMerge, runTrackedBillMerge } from '../src/services/trackedBillMerge.ts';
+import { loadHomeTrackedBills } from '../src/services/homeTrackedBills.ts';
 import {
   adminGet, adminSet, clearDemoProject, client, closeClients, loadRules,
   opaque,
@@ -245,5 +246,46 @@ test('local Auth + production-candidate Rules tracked-bill merge', async (t) => 
       adminGet('billIdentityIndex/v2_JPY_1000_F_black_AA123456BB', project),
     ]), immutableBefore);
     await cleanupCompletedTrackedBillMerge(source.db, target.db, sourceUid, targetUid, concurrentTicket);
+  });
+
+  await t.test('merged accounts retain the destination baseline and notify every later rediscovery', async () => {
+    await adminSet(`publicBills/${sourceBillId}`, { sightingsCount: 4, updatedAt: '2026-10-31T00:00:00Z' }, project, true);
+    await adminSet(`publicBills/${duplicateBillId}`, { id: duplicateBillId, sightingsCount: 9, updatedAt: '2026-10-30T00:00:00Z' }, project);
+    await adminSet(`publicBills/${followedBillId}`, { id: followedBillId, sightingsCount: 5, updatedAt: '2026-10-29T00:00:00Z' }, project);
+    const beforeSource = await adminGet(`${sourcePath}/${sourceBillId}`, project);
+    const beforeTarget = await adminGet(`${targetPath}/${sourceBillId}`, project);
+    const rows = await loadHomeTrackedBills(target.db, targetUid);
+    assert.equal(rows.find((row) => row.bill.id === sourceBillId).unseenSightingsCount, 2);
+    assert.equal(rows.find((row) => row.bill.id === duplicateBillId).unseenSightingsCount, 1);
+    assert.equal(rows.some((row) => row.bill.id === followedBillId), false);
+    assert.deepEqual(await adminGet(`${sourcePath}/${sourceBillId}`, project), beforeSource);
+    assert.deepEqual(await adminGet(`${targetPath}/${sourceBillId}`, project), beforeTarget);
+    assert.equal((await adminGet(`${targetPath}/${duplicateBillId}`, project)).lastSeenSightingsCount, 8);
+  });
+
+  await t.test('a legacy count-1 record is normalized only after merge consent and later rediscoveries notify', async () => {
+    const id = opaque();
+    const legacy = tracked(id, 'AB111111CD');
+    delete legacy.lastSeenSightingsCount;
+    await adminSet(`${sourcePath}/${id}`, legacy, project);
+    await adminSet(`publicBills/${id}`, { id, sightingsCount: 1, updatedAt: '2026-10-31T00:00:00Z' }, project);
+    const legacyPreview = await previewTrackedBillMerge(source.db, target.db, sourceUid, targetUid);
+    assert.deepEqual(legacyPreview.uninitializedOwnedBillIds, [id]);
+    assert.equal((await adminGet(`${sourcePath}/${id}`, project)).lastSeenSightingsCount, undefined);
+    await mergeTrackedBillsWithConsent({
+      sourceDb: source.db, targetDb: target.db, sourceUid, targetUid,
+      preview: legacyPreview, confirm: () => false,
+    });
+    assert.equal((await adminGet(`${sourcePath}/${id}`, project)).lastSeenSightingsCount, undefined);
+    const result = await mergeTrackedBillsWithConsent({
+      sourceDb: source.db, targetDb: target.db, sourceUid, targetUid,
+      preview: legacyPreview, confirm: () => true,
+    });
+    assert.equal(result.status, 'merged');
+    assert.deepEqual(await adminGet(`${sourcePath}/${id}`, project), { ...legacy, lastSeenSightingsCount: 1 });
+    assert.deepEqual(await adminGet(`${targetPath}/${id}`, project), { ...legacy, lastSeenSightingsCount: 1 });
+    await adminSet(`publicBills/${id}`, { sightingsCount: 3 }, project, true);
+    assert.equal((await loadHomeTrackedBills(target.db, targetUid)).find((row) => row.bill.id === id).unseenSightingsCount, 2);
+    await cleanupCompletedTrackedBillMerge(source.db, target.db, sourceUid, targetUid, result.ticketId);
   });
 });

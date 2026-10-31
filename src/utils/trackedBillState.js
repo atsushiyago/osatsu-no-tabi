@@ -16,6 +16,18 @@ export function resolveLastSeenBaseline(currentSightingsCount, storedSightingsCo
   };
 }
 
+/** Missing acknowledgement is not evidence that rediscoveries were read.
+ * @param {number} currentSightingsCount @param {number | undefined} storedSightingsCount
+ */
+export function resolveOwnedNotificationBaseline(currentSightingsCount, storedSightingsCount) {
+  const lastSeenSightingsCount = Number.isInteger(storedSightingsCount) ? storedSightingsCount : 1;
+  return {
+    lastSeenSightingsCount,
+    shouldPersistBaseline: !Number.isInteger(storedSightingsCount),
+    unseenSightingsCount: getUnseenSightingsCount(currentSightingsCount, lastSeenSightingsCount),
+  };
+}
+
 /** @template {{ unseenSightingsCount: number }} T @param {T[]} rows @returns {T[]} */
 export function getUnseenTrackedBills(rows) {
   return rows.filter((row) => row.unseenSightingsCount > 0);

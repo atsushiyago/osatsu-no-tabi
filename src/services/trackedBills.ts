@@ -1,14 +1,11 @@
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
-  serverTimestamp,
   startAfter,
-  updateDoc,
   where,
   type DocumentData,
   type QueryConstraint,
@@ -23,6 +20,7 @@ import { resolveLastSeenBaseline } from '../utils/trackedBillState.js';
 import { getPageWindow } from '../utils/publicBillPagination.js';
 import { loadHomeTrackedBills, type HomeTrackedBillNotice } from './homeTrackedBills';
 import { createShortReadCache, HOME_READ_TTL_MS } from '../utils/shortReadCache';
+import { ensureOwnedNotificationBaseline, markTrackedBillSeenInFirestore } from './trackedBillBaseline.ts';
 
 export const TRACKED_BILLS_PAGE_SIZE = 20;
 export type TrackedBillsCursor = QueryDocumentSnapshot<DocumentData>;
@@ -56,21 +54,10 @@ async function loadTrackedBillRows(
     if (typeof entry.publicBillId !== 'string' || typeof entry.serialNumber !== 'string') return null;
     const bill = await getPublicBillById(entry.publicBillId);
     if (!bill) return null;
-    const baseline = resolveLastSeenBaseline(bill.sightingsCount, entry.lastSeenSightingsCount as number | undefined);
+    const baseline = firstRegisteredByMe
+      ? await ensureOwnedNotificationBaseline(trackedDoc.ref.firestore, trackedDoc.ref, bill.id, bill.sightingsCount, entry.lastSeenSightingsCount)
+      : resolveLastSeenBaseline(bill.sightingsCount, entry.lastSeenSightingsCount as number | undefined);
     const lastSeenSightingsCount = baseline.lastSeenSightingsCount;
-
-    // One-time migration: establish a quiet baseline without showing old bills as new.
-    // Followed/imported rows are displayed read-only; do not silently rewrite
-    // their read baseline just because the separate section was opened.
-    if (baseline.shouldPersistBaseline && firstRegisteredByMe) {
-      try {
-        await updateDoc(trackedDoc.ref, {
-          lastSeenSightingsCount,
-        });
-      } catch (error) {
-        console.warn('Could not save tracked bill baseline; using current count for this visit:', error);
-      }
-    }
 
     return {
       bill,
@@ -136,12 +123,6 @@ export async function markTrackedBillSeen(
 ): Promise<void> {
   if (!db) return;
   const trackedRef = doc(db, 'users', uid, 'trackedBills', billId);
-  const trackedSnap = await getDoc(trackedRef);
-  if (!trackedSnap.exists()) return;
-  await updateDoc(trackedRef, {
-    lastSeenSightingsCount: sightingsCount,
-    lastSeenAt: serverTimestamp(),
-    lastSeenMunicipality: municipality,
-  });
+  await markTrackedBillSeenInFirestore(db, trackedRef, sightingsCount, municipality);
   invalidateHomeNotifications();
 }
